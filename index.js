@@ -1344,6 +1344,7 @@ export function apply(ctx) {
   }
 
   async function poll() {
+    enforceSinglePetWindow()
     if (!alive) return
     if (!ownsPoller()) {
       alive = false
@@ -1494,12 +1495,19 @@ export function apply(ctx) {
 
   /* ---- pet window ------------------------------------------------------ */
 
-  /** 清掉上一次激活遗留的宠物窗口（父进程已死但窗口还在，会占着互斥量）。 */
-  function killStalePetWindows() {
+  /**
+   * 清掉多余的宠物窗口。keepOldest = 只保留启动最早的那个。
+   * 注意：killer 自己的命令行里也含 pet.ps1，必须排除自身和同类进程，
+   * 否则它可能把自己干掉，半路就停手了（历史上真出现过窗口残留）。
+   */
+  function killStalePetWindows(keepOldest = false) {
     try {
       const escaped = PET_SCRIPT.replace(/'/g, "''")
-      const script = "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.CommandLine -like '*"
-        + escaped + "*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+      const match = "$_.CommandLine -like '*" + escaped + "*' -and $_.CommandLine -notlike '*Stop-Process*' -and $_.ProcessId -ne $PID"
+      const tail = keepOldest
+        ? '| Sort-Object CreationDate | Select-Object -Skip 1 | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }'
+        : '| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }'
+      const script = "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { " + match + " } " + tail
       spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
         windowsHide: true,
         stdio: 'ignore',
@@ -1507,6 +1515,27 @@ export function apply(ctx) {
       return true
     } catch {
       return false
+    }
+  }
+
+  /** 定时体检：桌面上只允许留一个宠物窗口，多出来的（旧脚本残留）清掉。 */
+  let lastPetCheckAt = 0
+  function enforceSinglePetWindow() {
+    const now = Date.now()
+    if (now - lastPetCheckAt < 20000) return
+    lastPetCheckAt = now
+    try {
+      const escaped = PET_SCRIPT.replace(/'/g, "''")
+      const script = "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\""
+        + " | Where-Object { $_.CommandLine -like '*" + escaped + "*' -and $_.CommandLine -notlike '*Stop-Process*' -and $_.ProcessId -ne $PID }"
+        + " | Sort-Object CreationDate | Select-Object -Skip 1"
+        + " | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+      spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+        windowsHide: true,
+        stdio: 'ignore',
+      })
+    } catch {
+      // 体检失败不影响主流程
     }
   }
 

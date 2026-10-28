@@ -304,6 +304,7 @@ $script:SquashStep = 0
 function Set-PetState([string]$StateName) {
     if (-not $script:States.ContainsKey($StateName)) { $StateName = 'walking' }
     if ($script:CurrentState -eq $StateName -and $script:Timer.IsEnabled) { return }
+    if ($script:CurrentState -ne $StateName) { Write-PetLog ('emotion -> ' + $StateName) }
     $script:CurrentState = $StateName
     $script:FrameIndex = 0
     $data = $script:States[$StateName]
@@ -509,16 +510,24 @@ function Apply-State($state) {
     if ($script:Emotions -notcontains $emotion) { $emotion = 'walking' }
     if ([string]$state.status -eq 'thinking') { $emotion = 'coding' }
     if ([string]$state.status -eq 'offline') { $emotion = 'crying' }
-    # 正在溜达时动画交给溜达逻辑，别被状态里的情绪覆盖
-    if ($script:WanderMoving) { $emotion = 'walking' }
-    elseif ($script:LocalEmotion -ne '' -and (Get-Date) -lt $script:LocalEmotionUntil -and [string]$state.status -ne 'thinking') {
-        $emotion = $script:LocalEmotion
-    }
 
     $seq = [int]$state.seq
-    if ($seq -eq $script:LastSeq) { return }
+    if ($seq -eq $script:LastSeq) {
+        # 没有新事件：溜达/停留的姿势优先，画面别乱跳
+        if ($script:WanderMoving) {
+            Set-PetState 'walking'
+        } elseif ($script:LocalEmotion -ne '' -and (Get-Date) -lt $script:LocalEmotionUntil) {
+            Set-PetState $script:LocalEmotion
+        }
+        return
+    }
     $script:LastSeq = $seq
 
+    # 有新事件（弹幕/礼物/进场/老板说话）：情绪的优先级最高。
+    # 正在溜达就先停下，把表情露出来，别让走路动画把哭/笑盖掉。
+    if ($script:WanderMoving) { Wander-Stop }
+    $script:EmotionHoldUntil = (Get-Date).AddMilliseconds(9000)
+    Clear-LocalEmotion
     Set-PetState $emotion
 
     $say = [string]$state.say
@@ -547,6 +556,8 @@ $script:WanderLastTick = $null
 $script:WanderIdleEmotion = 'happy'
 $script:LocalEmotion = ''
 $script:LocalEmotionUntil = [DateTime]::MinValue
+# 情绪保护期：刚哭/刚笑的时候别让溜达把它顶掉
+$script:EmotionHoldUntil = [DateTime]::MinValue
 
 $script:WanderTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:WanderDwellTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -563,6 +574,9 @@ function Wander-Pause([int]$Ms = 2500) {
     $script:WanderMoving = $false
     $script:WanderTimer.Stop()
     $script:WanderDwellTimer.Stop()
+    # 暂停结束后自动接着溜达，否则一次点击/一次回复就把溜达永久停掉
+    $script:WanderDwellTimer.Interval = [TimeSpan]::FromMilliseconds($Ms + 200)
+    $script:WanderDwellTimer.Start()
 }
 
 function Wander-Stop {
@@ -583,7 +597,6 @@ function Set-LocalEmotion([string]$Name, [int]$HoldMs = 0) {
 
 function Clear-LocalEmotion {
     $script:LocalEmotion = ''
-    $script:LocalEmotionUntil = [DateTime]::MinValue
 }
 
 function Get-PetBounds {
@@ -620,7 +633,8 @@ function Wander-PickTarget {
 
 function Wander-BeginMove {
     if (Wander-IsPaused) { return }
-    $target = Wander-PickTarget
+    # 刚有情绪反应（哭/笑）就先站着，别马上走开
+    if ((Get-Date) -lt $script:EmotionHoldUntil) { Wander-ScheduleNext; return }
     $script:WanderTargetX = $target.X
     $script:WanderTargetY = $target.Y
     $extra = $script:BoardExtra
@@ -673,7 +687,7 @@ function Step-Wander {
         # 到了就换个心情歇一会儿，再继续溜达
         # 停下来就别放走路动画了，换一个站立/生活类情绪（walking 看着像原地踏步）
         $idle = @('happy', 'mischievous', 'eating', 'unhappy') | Get-Random
-        Set-LocalEmotion $idle
+        Set-LocalEmotion $idle 8000
         Save-Position
         Wander-ScheduleNext
         return
