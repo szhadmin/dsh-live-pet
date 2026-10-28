@@ -1,7 +1,7 @@
 {
     "appUrl":  "http://127.0.0.1:8790",
-    "workspace":  "F:\\douyinlive",
-    "audioDir":  "F:\\douyinlive\\data\\audio",
+    "workspace":  "",
+    "audioDir":  "",
     "pythonBin":  "python",
     "manageLive":  true,
     "autoStartLive":  true,

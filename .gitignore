@@ -6,5 +6,15 @@ pet-window.json
 config.json
 .poller-lock
 
+# 直播服务的运行期数据（随插件一起发布，但运行时才写入）
+live/data/
+live/logs/
+live/songs/
+live/gifs/
+live/settings.json
+live/data.db
+__pycache__/
+*.pyc
+
 # 依赖
 node_modules/

@@ -186,6 +186,8 @@ window.__ModuleLoader__.load({
       const [message, setMessage] = React.useState({ kind: '', text: '' })
       const [liveState, setLiveState] = React.useState(null)
       const [liveBusy, setLiveBusy] = React.useState(false)
+      const [deps, setDeps] = React.useState(null)
+      const [depsBusy, setDepsBusy] = React.useState(false)
 
       async function load() {
         try {
@@ -325,7 +327,39 @@ window.__ModuleLoader__.load({
         await load()
       }
 
-      React.useEffect(() => { refreshLive() }, [])
+      async function refreshDeps() {
+        try {
+          const payload = await (await fetch('/dsh-live-pet/deps', { headers: { accept: 'application/json' } })).json()
+          setDeps(payload)
+        } catch {
+          setDeps(null)
+        }
+      }
+
+      async function installDeps() {
+        setDepsBusy(true)
+        setMessage({ kind: '', text: '' })
+        try {
+          const payload = await (await fetch('/dsh-live-pet/deps', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'install' }),
+          })).json()
+          if (payload.missing && payload.missing.length > 0) {
+            setMessage({ kind: 'err', text: '还缺：' + payload.missing.join('、') + '（输出：' + String(payload.output || '').slice(0, 200) + '）' })
+          } else if (payload.ok === true) {
+            setMessage({ kind: 'ok', text: '依赖已装好，可以点「启动」了' })
+          } else {
+            setMessage({ kind: 'err', text: '安装失败：' + String(payload.output || payload.error || '').slice(0, 220) })
+          }
+          await refreshDeps()
+        } catch (error) {
+          setMessage({ kind: 'err', text: '安装失败：' + (error && error.message ? error.message : error) })
+        }
+        setDepsBusy(false)
+      }
+
+      React.useEffect(() => { refreshLive(); refreshDeps() }, [])
 
       if (pet === null) {
         return h('div', { style: styles.wrap }, h('div', { style: styles.hint }, '正在读取配置…'))
@@ -377,6 +411,14 @@ window.__ModuleLoader__.load({
               onClick: () => controlLive('restart'),
             }, '重启'),
             h('button', { style: styles.button, disabled: liveBusy, onClick: refreshLive }, '刷新状态')),
+          h(Row, { label: '服务依赖' },
+            deps === null
+              ? h('span', { style: styles.hint }, '检测中…')
+              : (deps.missing && deps.missing.length > 0
+                ? h('span', { style: styles.err }, '缺：' + deps.missing.join('、'))
+                : h('span', { style: styles.ok }, '齐全（' + String(deps.python || 'python') + (deps.bundled ? ' · 自带直播服务' : ' · 外部目录') + '）')),
+            h('button', { style: styles.button, disabled: depsBusy, onClick: installDeps }, depsBusy ? '安装中…' : '安装依赖'),
+            h('button', { style: styles.button, disabled: depsBusy, onClick: refreshDeps }, '重新检测')),
           h(Row, { label: '端口' },
             h(Number, { value: petValue('livePort'), onChange: (v) => setPetValue('livePort', v) }),
             h('span', { style: styles.hint }, `监听 ${petValue('liveHost') || '127.0.0.1'}；换端口后点「重启」`)),

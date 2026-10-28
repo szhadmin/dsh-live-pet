@@ -495,6 +495,32 @@ function appBaseOf(config) {
   return String((config && config.appUrl) || 'http://127.0.0.1:8790')
 }
 
+/** 直播服务的代码目录：优先用插件自带的 live/，否则用 config.workspace。 */
+function liveWorkspaceOf(config) {
+  const bundled = join(PKG_DIR, 'live')
+  if (existsSync(join(bundled, 'app.py'))) return bundled
+  return String((config && config.workspace) || '')
+}
+
+/** 直播服务需要的 python 包（缺了就跑不起来）。 */
+const LIVE_PY_MODULES = ['edge_tts', 'websocket', 'requests', 'betterproto', 'py_mini_racer', 'execjs']
+
+/** 用目标 python 检查缺哪些包。 */
+async function checkLiveDeps(python) {
+  const code = 'import importlib.util as u, json\n'
+    + `mods = ${JSON.stringify(LIVE_PY_MODULES)}\n`
+    + 'print(json.dumps([m for m in mods if u.find_spec(m) is None]))'
+  const result = await runProcess(String(python || 'python'), ['-c', code], { timeoutMs: 20000 })
+  if (result.code !== 0) {
+    return { ok: false, python: String(python || 'python'), missing: [], error: (result.stderr || '').trim().split('\n').slice(-1)[0] || `exit ${result.code}` }
+  }
+  try {
+    const missing = JSON.parse((result.stdout || '').trim().split('\n').filter(Boolean).pop() || '[]')
+    return { ok: true, python: String(python || 'python'), missing: Array.isArray(missing) ? missing : [] }
+  } catch {
+    return { ok: false, python: String(python || 'python'), missing: [], error: '依赖检测输出无法解析' }
+  }
+}
 async function fetchState(config) {
   const response = await fetch(`${appBaseOf(config)}/api/state`, { signal: AbortSignal.timeout(4000) })
   if (!response.ok) throw new Error(`state HTTP ${response.status}`)
@@ -679,6 +705,12 @@ export function apply(ctx) {
       void silenceAppGreetings()
       return { ok: true, already: true }
     }
+    const deps = await checkLiveDeps(config.pythonBin)
+    if (deps.missing.length > 0) {
+      liveLastError = `缺 python 包：${deps.missing.join('、')}（设置页点「安装依赖」）`
+      log(`live deps missing: ${deps.missing.join(',')}`)
+      return { ok: false, error: liveLastError, missing: deps.missing }
+    }
     // A fresh instance starts a fresh feed ring buffer: drop every cursor from the old one.
     feedSince = null
     feedRetryAt = 0
@@ -696,7 +728,7 @@ export function apply(ctx) {
     ]
     try {
       liveChild = spawn(String(config.pythonBin || 'python'), args, {
-        cwd: String(config.workspace),
+        cwd: liveWorkspaceOf(config),
         env: {
           ...process.env,
           FATWHALE_BASE_DIR: dir,
@@ -1486,6 +1518,42 @@ export function apply(ctx) {
       const searchParams = new URLSearchParams(queryAt === -1 ? '' : url.slice(queryAt + 1))
 
       /* ---- managed live-service instance: one-click start/stop --------- */
+      /* ---- 直播服务依赖：检查 + 一键安装 ------------------------------- */
+      if (pathname === '/dsh-live-pet/deps' && req.method === 'GET') {
+        const deps = await checkLiveDeps(config.pythonBin)
+        const workspace = liveWorkspaceOf(config)
+        sendJson(res, {
+          ...deps,
+          workspace,
+          bundled: existsSync(join(PKG_DIR, 'live', 'app.py')),
+          requirements: existsSync(join(workspace, 'requirements.txt')),
+        })
+        return
+      }
+      if (pathname === '/dsh-live-pet/deps' && req.method === 'POST') {
+        const body = await readJsonBody(req, 8192)
+        if (!body || body.action !== 'install') {
+          sendJson(res, { ok: false, error: 'action 必须是 install' })
+          return
+        }
+        const workspace = liveWorkspaceOf(config)
+        const reqFile = join(workspace, 'requirements.txt')
+        const args = existsSync(reqFile)
+          ? ['-m', 'pip', 'install', '-r', reqFile]
+          : ['-m', 'pip', 'install', 'edge-tts', 'websocket-client', 'requests', 'betterproto', 'py-mini-racer', 'PyExecJS', 'protobuf']
+        log(`installing live deps via ${String(config.pythonBin || 'python')} ${args.join(' ')}`)
+        const result = await runProcess(String(config.pythonBin || 'python'), args, { cwd: workspace, timeoutMs: 300000 })
+        const tail = ((result.stdout || '') + '\n' + (result.stderr || '')).trim().split('\n').filter(Boolean).slice(-6).join(' | ')
+        log(`pip install exit ${result.code}: ${tail.slice(0, 200)}`)
+        const after = await checkLiveDeps(config.pythonBin)
+        sendJson(res, {
+          ok: result.code === 0 && after.missing.length === 0,
+          exit: result.code,
+          output: tail.slice(0, 900),
+          missing: after.missing,
+        })
+        return
+      }
       if (pathname === '/dsh-live-pet/live' && req.method === 'GET') {
         sendJson(res, { ok: true, status: await liveStatus() })
         return

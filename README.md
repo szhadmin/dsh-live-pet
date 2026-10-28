@@ -17,14 +17,15 @@
 | --- | --- |
 | 系统 | Windows 10/11（宠物窗口是 WPF，用 PowerShell 5.1 跑） |
 | DSH | DeepSeek Harness 桌面版（Host + Web UI） |
-| 直播服务 | [douyinlive](https://github.com/szhadmin/douyinlive) 项目的 `app.py`（提供弹幕、点歌台、礼物规则） |
-| Python | 装了 `edge-tts` 的解释器（语音合成用；`pythonBin` 可指向任意 python） |
+| Python | 3.10+（语音合成 + 直播服务都用它；`pythonBin` 可指向任意解释器） |
+| Python 包 | `edge-tts` `websocket-client` `requests` `betterproto` `py-mini-racer` `PyExecJS` `protobuf`（设置页可一键安装） |
 | Node | DSH 自带的 node 就够，无需额外安装 |
 | 模型 | 一个 OpenAI 兼容的 API key（DSH 里已经配好的那个即可） |
 
-> 插件**不内置**抖音弹幕抓取，它依赖 `app.py` 那份直播服务。插件可以**托管**它：
-> 在设置页点一下就在 `8791` 端口起一个独立实例（自己的 settings/data/songs/logs），
-> 和你手动开的 `8790` 完全隔离。
+> **开箱即用**：抖音弹幕抓取、点歌台、礼物规则、控制台页面都在本仓库的 `live/` 里，
+> 不用再单独装别的项目。插件会在 `8791` 端口把这份直播服务跑成独立实例
+> （数据落在插件的 `live-data/`，和别的实例完全隔离）。
+> 想改用你自己的直播服务目录，把 `config.json` 的 `workspace` 指过去即可（留空 = 用自带的 `live/`）。
 
 ## 安装
 
@@ -35,8 +36,11 @@ plugin_manager install_bundle  target="github:szhadmin/dsh-live-pet"
 plugin_manager set_bundle      target="dsh-live-pet" enabled=true
 ```
 
-> **装完必须重启一次 DSH**：设置页属于客户端模块，DSH 的客户端模块表在启动时编排，
-> 热装不会把新页面加进来。重启后打开 **设置 → 直播宠物**。
+装完做两件事：
+
+1. **重启一次 DSH**：设置页属于客户端模块，DSH 的客户端模块表在启动时编排，热装不会把新页面加进来。
+2. 打开 **设置 → 直播宠物**，看「服务依赖」那行：显示"齐全"就能直接点 **启动**；
+   显示缺包就点 **安装依赖**（后端跑 `pip install -r live/requirements.txt`），装完再启动。
 
 ### 方式 B：本地目录（改代码时用这个）
 
@@ -115,7 +119,8 @@ client.js                     Client 半边：DSH 设置页「直播宠物」
 pet.ps1                       WPF 宠物窗口（透明置顶、动图、气泡、输入条、歌单板）
 profile/pet-tools.js          宠物 profile 自带的只读工具（系统状态/读文件/搜索/点歌）
 profile/cordis.patch.tpl.yml  宠物 profile 模板（关掉写工具、禁用子智能体/工作流等）
-frames/<情绪>/NNN.png         240×240 动图帧（9 种情绪，共 546 张）
+frames/<情绪>/NNN.png         240×240 动图帧（9 种情绪，共 546 张，已压到约 7MB）
+live/                         内置的直播服务（app.py + core + vendor + web + defaults + requirements.txt）
 locale/                       设置页文案（中/英）
 cordis.patch.yml              bundle patch
 ```
