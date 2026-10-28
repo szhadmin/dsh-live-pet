@@ -1,0 +1,140 @@
+{
+  "api_key": "",
+  "base_url": "https://api.deepseek.com/v1",
+  "model": "deepseek-chat",
+  "reasoning_effort": "none",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "+4%",
+  "pitch": "+3Hz",
+  "gif_theme": "webp",
+  "reply_cooldown": 0.6,
+  "token_price": 2.0,
+  "host": {
+    "name": "大肥鲸",
+    "title": "大肥鲸的深夜工位",
+    "tagline": "一条靠烧 token 赚钱的打工鲸"
+  },
+  "persona": "",
+  "douyin": {
+    "mode": "off",
+    "live_url": "",
+    "room_id": "",
+    "bridge_url": "ws://127.0.0.1:8888",
+    "title": "大肥鲸在线直播 · 深海工位",
+    "account": "",
+    "auto_reply_cooldown": 1.2,
+    "max_reply_per_minute": 20,
+    "welcome_enter": true,
+    "enter_gap": 5.0,
+    "enter_user_gap": 180.0,
+    "enter_stale_seconds": 15.0,
+    "welcome_like": true,
+    "like_gap": 6.0,
+    "like_user_gap": 120.0,
+    "cookie": "",
+    "identity": "audience",
+    "api_version": "v2",
+    "did": "",
+    "ws_host": "",
+    "mate_log": true,
+    "mate_log_dir": "",
+    "gift_names": {}
+  },
+  "memory": {
+    "short_turns": 6,
+    "fact_limit": 8,
+    "max_facts_per_user": 60,
+    "global_highlights": 4,
+    "llm_extract": false
+  },
+  "songs": {
+    "enable": true,
+    "gift_min_value": 0.5,
+    "volume": 0.55,
+    "max_queue": 10,
+    "auto_next": true,
+    "free_request_cooldown": 15,
+    "online": true,
+    "prefer_online": true,
+    "source": "netease",
+    "online_api": "https://music-api.gdstudio.xyz/api.php",
+    "br": 320,
+    "search_limit": 3,
+    "online_timeout": 10,
+    "cache_download": true,
+    "max_duration": 420,
+    "gift_song_hot": true,
+    "auto_dj": true,
+    "auto_dj_delay": 3,
+    "auto_dj_keep": true
+  },
+  "gift_actions": {
+    "enable": true,
+    "cooldown": 0.5,
+    "rules": [],
+    "default_hold": 6,
+    "actions": {},
+    "menu": [
+      "小心心",
+      "玫瑰",
+      "大啤酒",
+      "生日蛋糕",
+      "跑车"
+    ]
+  },
+  "network": {
+    "allow_lan": true,
+    "host": "0.0.0.0",
+    "port": 8790,
+    "open_firewall": true
+  },
+  "tools": {
+    "enable": true,
+    "default_city": "北京",
+    "timeout": 8
+  },
+  "idle": {
+    "enable": true,
+    "seconds": 30,
+    "grow": true,
+    "max_gap": 150,
+    "max_per_hour": 30
+  },
+  "promo": {
+    "enable": true,
+    "seconds": 240,
+    "min_gap": 150,
+    "max_per_hour": 12,
+    "agent": true,
+    "with_music": true
+  },
+  "harness": {
+    "enable": true,
+    "profile": "whale",
+    "session": true,
+    "session_ttl_hours": 12,
+    "timeout": 20,
+    "max_chars": 70,
+    "deep": false,
+    "deep_profile": "whale-deep",
+    "deep_timeout": 45,
+    "question_only": false,
+    "dsh_bin": "",
+    "dsh_home": "",
+    "workspace": "",
+    "provider": "buddyhub",
+    "model": "cn:deepseek-v4.1-flash",
+    "base_url": "http://81.71.69.29:7863/v1",
+    "api_key_env": "BUDDYHUB_API_KEY",
+    "api_key": "wbk_c3047d6906a0cd0bd0eeac89886eea7abbfe98c08f9536ad2f33c79ece55a5af",
+    "fallback_model": true,
+    "style": 3,
+    "temperature": 0.95,
+    "quirks": [
+      "我丢",
+      "么西么西"
+    ],
+    "persona_suffix": "喜欢怼人，暴躁鲸鱼，沙雕鲸鱼",
+    "gift_thanks_agent": true
+  }
+}

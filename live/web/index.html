@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大肥鲸 · 直播控制台</title>
+<link rel="stylesheet" href="/console.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🐋</span>
+    <div><b>大肥鲸在线直播</b><small>FAT WHALE LIVE · 有记忆的抖音直播间</small></div>
+  </div>
+  <div class="top-actions">
+    <span class="state-pill" id="runState"><i></i>运行中</span>
+    <span class="state-pill ghost" id="douyinPill">抖音：未接入</span>
+    <span class="state-pill ghost" id="sAction">待机</span>
+    <a class="btn ghost" href="/stage" target="_blank">打开 OBS 舞台 ↗</a>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- 预览 -->
+  <section class="col preview-col">
+    <div class="card">
+      <div class="card-head"><span>直播实时预览</span><span class="pill">1080 × 1920</span></div>
+      <div class="phone"><iframe src="/stage?preview=1" title="直播预览" loading="lazy"></iframe></div>
+      <div class="quick-say">
+        <button class="btn" id="sayBtn">让鲸宝主动说一句</button>
+        <button class="btn ghost" id="soundBtn">测试 OBS 直播声音</button>
+      </div>
+    </div>
+    <div class="card stats">
+      <div class="card-head"><span>本场数据</span><span class="pill live">LIVE</span></div>
+      <div class="stat-grid">
+        <div><small>AI 回复</small><b id="sRequests">0</b></div>
+        <div><small>输入 TOKEN</small><b id="sIn">0</b></div>
+        <div><small>输出 TOKEN</small><b id="sOut">0</b></div>
+        <div><small>礼物事件</small><b id="sGifts">0</b></div>
+        <div><small>礼物流水</small><b id="sGiftValue">¥0.0</b></div>
+        <div><small>队列</small><b id="sQueue">0</b></div>
+      </div>
+      <div class="mem-line">
+        记忆库：<b id="sUsers">0</b> 位观众 · <b id="sFacts">0</b> 条事实 · <b id="sTurns">0</b> 段对话
+      </div>
+    </div>
+
+    <div class="card net-card">
+      <div class="card-head"><span>局域网访问</span><span class="pill" id="netPill">检测中</span></div>
+      <div class="net-rows" id="netRows"></div>
+      <div class="row">
+        <button class="btn primary small" id="netOpen">开放局域网</button>
+        <button class="btn ghost small" id="netRefresh">重新检测</button>
+      </div>
+      <p class="tip" id="netTip">同一 WiFi 的手机 / 另一台电脑打开上面的地址，就能看舞台或控制台。
+        只想本机访问就把 settings.json 里 network.host 改成 127.0.0.1（改完重启）。</p>
+    </div>
+  </section>
+
+  <!-- 控制区 -->
+  <section class="col control-col">
+    <div class="card grow">
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="interact">互动测试</button>
+        <button class="tab" data-tab="memory">智能体记忆</button>
+        <button class="tab" data-tab="songs">礼物点歌</button>
+        <button class="tab" data-tab="gifts">礼物动作</button>
+        <button class="tab" data-tab="giftbook">礼物图鉴</button>
+        <button class="tab" data-tab="tools">智能体工具</button>
+        <button class="tab" data-tab="harness">直播智能体</button>
+        <button class="tab" data-tab="douyin">抖音接入</button>
+        <button class="tab" data-tab="model">模型语音</button>
+      </div>
+
+      <!-- 互动 -->
+      <div class="tab-body active" data-body="interact">
+        <label>观众昵称</label>
+        <input id="userInput" value="海盐泡泡" maxlength="20">
+        <label>弹幕内容</label>
+        <textarea id="textInput" maxlength="300">大肥鲸，你还记得我吗？</textarea>
+        <button class="btn primary" id="sendBtn">发送弹幕，等鲸宝回复 →</button>
+        <div class="quick-title">快捷话术（用于验证记忆）</div>
+        <div class="quick">
+          <button data-q="我叫小林，我在准备考研">自我介绍</button>
+          <button data-q="你还记得我叫什么吗？">考记忆</button>
+          <button data-q="我昨天也来看你了">回访</button>
+          <button data-q="我喜欢吃火锅">偏好</button>
+          <button data-q="给我讲个笑话">讲笑话</button>
+          <button data-q="鲸宝晚安">下播</button>
+        </div>
+        <div class="gift-row">
+          <select id="giftSelect">
+            <option>小心心</option><option>玫瑰</option><option>棒棒糖</option>
+            <option>火锅</option><option>啤酒</option><option>小星星</option>
+            <option>浪漫花火</option><option>跑车</option><option>抖音1号</option>
+          </select>
+          <button class="btn" id="giftBtn">模拟礼物</button>
+          <span class="muted" id="giftActionHint" style="align-self:center;font-size:11.5px"></span>
+        </div>
+        <div class="quick-title">冷场自己找话题（没人说话时鲸宝主动开口）</div>
+        <div class="gift-row">
+          <select id="idleEnable">
+            <option value="1">开启</option>
+            <option value="0">关闭</option>
+          </select>
+          <input id="idleSeconds" type="number" min="5" max="600" step="5" value="30" title="静默多少秒后主动开口">
+          <span class="muted" style="align-self:center;font-size:12px">秒没人说话就主动聊</span>
+          <button class="btn" id="idleSave">保存</button>
+        </div>
+        <p class="tip" id="idleTip">一直没人理它时，间隔会自动拉长（30→45→60…最多 150 秒），有人发弹幕立刻归零重算。
+          话题由模型现场生成，会参考最近直播间的聊天；点歌播放中不插话。</p>
+
+        <div class="quick-title">定时口播（点点赞 / 点点关注 / 点点小心心）</div>
+        <div class="gift-row">
+          <select id="promoEnable">
+            <option value="1">开启</option>
+            <option value="0">关闭</option>
+          </select>
+          <input id="promoSeconds" type="number" min="60" max="1800" step="30" value="240" title="每隔多少秒提醒一次">
+          <span class="muted" style="align-self:center;font-size:12px">秒提醒一次（有弹幕/礼物时会自动让位）</span>
+          <button class="btn" id="promoSave">保存</button>
+        </div>
+        <p class="tip" id="promoTip">默认每 4 分钟插一句，每小时最多 12 次；有智能体时由它自己组织台词，否则用本地话术池（18 条不重复）。</p>
+
+        <p class="tip">同一观众 1.2 秒内只回一次，全场每分钟最多 20 条，可在「抖音接入」里调。</p>
+      </div>
+
+      <!-- 记忆 -->
+      <div class="tab-body" data-body="memory">
+        <div class="mem-head">
+          <span>记忆是真实落盘的：SQLite 文件 <code id="dbPath">data/memory.sqlite3</code></span>
+          <button class="btn ghost small" id="refreshMem">刷新</button>
+        </div>
+        <div class="mem-wrap">
+          <div class="mem-list" id="memList"></div>
+          <div class="mem-detail" id="memDetail">
+            <p class="muted">点左边任意观众，查看鲸宝记住的每一条事实。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 点歌 -->
+      <div class="tab-body" data-body="songs">
+        <div class="row2">
+          <div>
+            <label>点歌开关</label>
+            <select id="songEnable"><option value="1">开启</option><option value="0">关闭</option></select>
+          </div>
+          <div>
+            <label>礼物门槛（价值 ≥ 就点歌）</label>
+            <input id="songThreshold" type="number" step="0.1" min="0" value="0.5">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>音乐音量</label>
+            <input id="songVolume" type="range" min="0" max="1" step="0.05" value="0.55">
+            <div class="field-hint" id="songVolumeHint">55%（鲸宝说话时自动压低）</div>
+          </div>
+          <div>
+            <label>放完自动下一首</label>
+            <select id="songAuto"><option value="1">开</option><option value="0">关</option></select>
+          </div>
+          <div>
+            <label>开播自动放抖音热歌（不用人点）</label>
+            <select id="songAutoDj"><option value="1">开</option><option value="0">关</option></select>
+            <div class="field-hint">队列空了自动续播；礼物点歌永远排在它前面</div>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>在线曲库（真歌，不再是 demo）</label>
+            <select id="songOnline">
+              <option value="1">开（点歌去网易云/QQ 搜）</option>
+              <option value="0">关（只用本地 songs/ 目录）</option>
+            </select>
+          </div>
+          <div>
+            <label>音乐源</label>
+            <select id="songSource">
+              <option value="netease">网易云音乐</option>
+              <option value="tencent">QQ音乐</option>
+              <option value="kugou">酷狗音乐</option>
+              <option value="kuwo">酷我音乐</option>
+              <option value="migu">咪咕音乐</option>
+              <option value="douyin">抖音热歌（关键词检索）</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>音质</label>
+            <select id="songBr">
+              <option value="320">320kbps</option>
+              <option value="192">192kbps</option>
+              <option value="128">128kbps</option>
+            </select>
+          </div>
+          <div>
+            <label>下载到本地播放（防直链过期）</label>
+            <select id="songCache">
+              <option value="1">开（推荐）</option>
+              <option value="0">关（直接播远端直链）</option>
+            </select>
+          </div>
+        </div>
+        <div class="row"><button class="btn primary" id="songSave">保存点歌设置</button></div>
+
+        <div class="queue-title">在线搜歌 <span id="onlineCount">0</span> 条</div>
+        <div class="row">
+          <input id="onlineQuery" placeholder="歌名 / 歌手，例如：起风了、周杰伦 晴天">
+          <button class="btn" id="onlineSearch">搜索</button>
+          <button class="btn ghost" id="onlineHot">抖音热歌</button>
+          <button class="btn ghost" id="onlineClear" title="搜不到时点一下：清空搜索缓存立刻重试">清缓存</button>
+        </div>
+        <div class="song-lib" id="onlineHits"><p class="muted">搜一下，点结果直接入队。</p></div>
+
+        <div class="song-now" id="songNow">当前没有在放歌</div>
+
+        <div class="row2">
+          <div>
+            <label>手动点歌（歌名或标签，留空=随机）</label>
+            <input id="songQuery" placeholder="例如：起风了 / 周杰伦 / 轻快">
+          </div>
+          <div>
+            <label>点歌人</label>
+            <input id="songUser" value="测试观众">
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="songRequest">点歌</button>
+          <button class="btn" id="songSkip">跳过这首</button>
+          <button class="btn ghost" id="songStop">停止并清空队列</button>
+        </div>
+
+        <div class="queue-title">播放队列 <span id="songQueueLen">0</span></div>
+        <div class="song-queue" id="songQueue"></div>
+
+        <div class="queue-title">曲库 <span id="songLibLen">0</span> 首（把 mp3/wav 丢进 songs/ 即可）</div>
+        <div class="song-lib" id="songLib"></div>
+
+        <p class="tip">观众在弹幕里发「点歌 歌名 / 来一首 歌名」也能点；礼物价值达到门槛会自动点一首并道谢。
+          音乐走 OBS 舞台播放，鲸宝说话时自动压低音量。</p>
+      </div>
+
+      <!-- 礼物动作 -->
+      <div class="tab-body" data-body="gifts">
+        <div class="queue-title">礼物 → 小鲸鱼动作 对照表
+          <span id="gaGifSummary"></span>
+        </div>
+        <p class="tip" id="gaGifTip">观众送什么礼物，鲸鱼就做什么动作。每张卡片可以直接改
+          <b>动图</b>和<b>停留秒数</b>：把自定义 GIF 丢进 <code>gifs/</code> 目录，它就会出现在下拉框里，
+          改完点「保存」立刻生效（不用重启）。缺文件时舞台会自动回退到已有素材，不会出现破图。</p>
+        <div class="ga-cards" id="gaCards"></div>
+
+        <div class="queue-title">礼物答谢称呼（随机撒一个）
+          <span id="gaHonorifics"></span>
+        </div>
+        <p class="tip">每条答谢都会带一个称呼，不会每条都是「谢谢XX」。想改就去
+          <code>core/gift_actions.py</code> 的 <code>HONORIFICS</code>。</p>
+
+        <div class="row2">
+          <div>
+            <label>礼物动作开关</label>
+            <select id="gaEnable">
+              <option value="1">开（送礼就做动作）</option>
+              <option value="0">关</option>
+            </select>
+          </div>
+          <div>
+            <label>动作最小间隔（秒）</label>
+            <input id="gaCooldown" type="number" step="0.1" min="0" value="0.5">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>动图默认停留（秒，没单独配的动作都用这个）</label>
+            <input id="gaDefaultHold" type="number" step="0.5" min="1" max="60" value="6">
+          </div>
+          <div>
+            <label>怎么换成自己的 GIF</label>
+            <div class="muted" style="font-size:11.5px;line-height:1.6">
+              把 <code>xxx.gif</code> 放进 <code>gifs/</code>，再到上面卡片的「动图」下拉里选它。<br>
+              想要透明底舞台版，跑一次 <code>python tools\prepare_gifs.py</code> 生成
+              <code>gifs/stage/xxx.webp</code>。
+            </div>
+          </div>
+        </div>
+
+        <div class="queue-title">匹配规则 <span id="gaRuleLen">0</span> 条（从上往下，第一条命中就生效）</div>
+        <div class="ga-head">
+          <span>礼物关键词（逗号分隔）</span><span>动作</span><span>台词（{user} {gift} {count}）</span><span></span>
+        </div>
+        <div id="gaRules" class="ga-rules"></div>
+        <div class="row">
+          <button class="btn" id="gaAdd">＋ 加一条</button>
+          <button class="btn ghost" id="gaDefaults">载入内置默认</button>
+          <button class="btn primary" id="gaSave">保存礼物动作</button>
+        </div>
+
+        <div class="row2">
+          <div>
+            <label>试一下：礼物名</label>
+            <input id="gaTestGift" value="小星星">
+          </div>
+          <div>
+            <label>参考价值（元，可选）</label>
+            <input id="gaTestValue" type="number" step="0.1" value="1">
+          </div>
+        </div>
+        <div class="row"><button class="btn" id="gaTest">看会命中什么动作</button></div>
+        <div class="cfg-result" id="gaResult"></div>
+
+        <p class="tip">观众送礼物时：先按这里匹配动作（鲸鱼转圈 / 开饭 / 鞠躬 / 撒花…），舞台上放对应特效，
+          再让智能体带记忆道谢。动作写在 <code>gift_actions.rules</code> 里，<code>*</code> 是兜底规则；
+          台词支持 <code>{user}</code> <code>{gift}</code> <code>{count}</code> <code>{value}</code>
+          <code>{boss}</code> 占位符（<code>{boss}</code> 会随机变成 金主 / 大佬 / 铁子 / 老板）。</p>
+      </div>
+
+      <!-- 礼物图鉴：礼物图 + 抖币 + 折合人民币 + 命中动作 -->
+      <div class="tab-body" data-body="giftbook">
+        <div class="row">
+          <input id="gbQuery" placeholder="搜礼物名或动作名，例如：玫瑰 / 火锅 / 小心心">
+          <button class="btn" id="gbRefresh">刷新</button>
+        </div>
+        <div class="queue-title" id="gbSummary">正在读取礼物表…</div>
+        <p class="tip" id="gbTip">图标和抖币价来自抖音直播礼物列表接口（<code>live.douyin.com/webcast/gift/list/</code>），
+          抖币按 <b>10 抖币 = 1 元</b> 折算。直播里真实收到新礼物时，名字 / 抖币 / 图标也会自动补进来。
+          点任意一行可以直接在直播间模拟送这个礼物，看鲸鱼做什么动作。</p>
+        <div class="gb-table">
+          <div class="gb-head">
+            <span>图标</span><span>礼物</span><span>抖币</span><span>折合</span>
+            <span>鲸鱼动作</span><span>动图 / 停留</span><span></span>
+          </div>
+          <div id="gbRows" class="gb-rows"></div>
+        </div>
+      </div>
+
+      <!-- 智能体工具 -->
+      <div class="tab-body" data-body="tools">
+        <label>工具开关</label>
+        <select id="toolEnable">
+          <option value="1">开启（观众问天气/时间会自动查真实数据）</option>
+          <option value="0">关闭</option>
+        </select>
+        <label>默认城市（观众没说城市时查这里）</label>
+        <input id="toolCity" placeholder="北京">
+        <div class="row"><button class="btn primary" id="toolSave">保存工具设置</button></div>
+
+        <div class="queue-title">已接入的工具</div>
+        <div class="tool-list" id="toolList"></div>
+
+        <label>手动试一下（用自然语言，模拟观众提问）</label>
+        <div class="row">
+          <input id="toolQuery" placeholder="例如：茅台股价多少 / 周杰伦哪年出生 / 杭州天气">
+          <button class="btn" id="toolTest">查询</button>
+        </div>
+        <div class="tool-result" id="toolResult">还没有查询</div>
+        <p class="tip">工具在后台同步执行：先查真实数据，再交给模型用鲸鱼口吻说出来，所以观众问什么都不会得到「我不知道」。
+          全部只读查询，不登录、不下单、不改任何外部状态；查不到会诚实说查不到，不瞎编。</p>
+      </div>
+
+      <!-- 直播智能体（DSH Harness） -->
+      <div class="tab-body" data-body="harness">
+        <div class="mem-head">
+          <span id="hxState">智能体：检测中…</span>
+          <button class="btn ghost small" id="hxRefresh">重新检测</button>
+        </div>
+        <div class="tool-result" id="hxInfo">正在探测本机的 DeepSeek Harness…</div>
+
+        <div class="row2">
+          <div>
+            <label>弹幕交给智能体思考</label>
+            <select id="hxEnable">
+              <option value="1">开启（推荐：真推理 + 会话记忆）</option>
+              <option value="0">关闭（只走快模型 / 本地话术）</option>
+            </select>
+          </div>
+          <div>
+            <label>哪些弹幕交给它</label>
+            <select id="hxQuestionOnly">
+              <option value="0">所有弹幕都交给智能体</option>
+              <option value="1">只有提问类弹幕（省钱）</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>单轮超时（秒，超了就退回快模型）</label>
+            <input id="hxTimeout" type="number" min="5" max="120" step="1" value="20">
+          </div>
+          <div>
+            <label>一句话上限（汉字）</label>
+            <input id="hxMaxChars" type="number" min="20" max="140" step="5" value="70">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>跨弹幕记住同一场直播</label>
+            <select id="hxSession">
+              <option value="1">开（一场直播一条会话）</option>
+              <option value="0">关（每条弹幕都当新的）</option>
+            </select>
+          </div>
+          <div>
+            <label>难题开思维链（更聪明，慢 3~10 秒）</label>
+            <select id="hxDeep">
+              <option value="0">关（默认，2~3 秒就回）</option>
+              <option value="1">开（提问类弹幕走深度思考）</option>
+            </select>
+          </div>
+        </div>
+        <label>智能体用的模型（留空=沿用上面的模型）</label>
+        <input id="hxModel" placeholder="例如 cn:deepseek-v4.1-flash">
+        <label>智能体用的 API 地址（留空=沿用上面的地址）</label>
+        <input id="hxBaseUrl" placeholder="http://127.0.0.1:7863/v1">
+        <div class="row2">
+          <div>
+            <label>密钥环境变量名</label>
+            <input id="hxKeyEnv" placeholder="BUDDYHUB_API_KEY">
+          </div>
+          <div>
+            <label>智能体专用密钥（留空=沿用上面的 Key）</label>
+            <input id="hxKey" type="password" autocomplete="off" placeholder="留空则复用模型 Key">
+          </div>
+        </div>
+        <label>dsh 入口 bin.js（留空=自动探测，一般不用填）</label>
+        <input id="hxBin" placeholder="D:\tools\deepseek\resources\app\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js">
+
+        <div class="queue-title">说话的人味（提示词层，改完保存 + 铺一次 profile）</div>
+        <div class="row2">
+          <div>
+            <label>风格强度</label>
+            <select id="hxStyle">
+              <option value="0">0 · 规矩简短</option>
+              <option value="1">1 · 自然</option>
+              <option value="2">2 · 真人味（推荐）</option>
+              <option value="3">3 · 放开一点（会贫嘴）</option>
+            </select>
+          </div>
+          <div>
+            <label>礼物答谢也走智能体</label>
+            <select id="hxGiftAgent">
+              <option value="1">开（带记忆，不像模板）</option>
+              <option value="0">关（用动作台词/模板）</option>
+            </select>
+          </div>
+        </div>
+        <label>口癖（逗号分隔，会自然带出来；留空=不带）</label>
+        <input id="hxQuirks" placeholder="咕噜，本鲸，记小本本">
+        <label>额外人设要求（追加在系统提示词末尾，可留空）</label>
+        <textarea id="hxSuffix" rows="2" placeholder="例如：多用反问，一次只说两句以内，别讲道理"></textarea>
+        <div class="row">
+          <button class="btn primary" id="hxSave">保存智能体设置</button>
+          <button class="btn" id="hxSetup">铺 / 刷新 profile</button>
+          <button class="btn ghost" id="hxReset">重置会话</button>
+        </div>
+
+        <div class="queue-title">试一句（走真实智能体，不占直播间）</div>
+        <div class="row">
+          <input id="hxTestText" placeholder="例如：鲸鱼为什么会喷水？">
+          <button class="btn" id="hxTest">让智能体回一句</button>
+        </div>
+        <div class="cfg-result" id="hxResult"></div>
+
+        <p class="tip">智能体 = 本机 DSH（DeepSeek Harness）真跑一轮：记忆注入 → 推理 → 一句台词。
+          它跑在独立进程里，失败、超时都不会影响直播，会自动退回快模型或本地话术。
+          弹幕一律当「不可信内容」处理，profile 里已经关掉 bash / 文件 / 联网 / 子智能体等全部工具，只让它说话。</p>
+      </div>
+
+      <!-- 抖音 -->
+      <div class="tab-body" data-body="douyin">
+        <label>数据源模式</label>
+        <select id="dyMode">
+          <option value="live">live · 直连抖音直播间（开源 DouyinLiveWebFetcher，推荐）</option>
+          <option value="bridge">bridge · 连接本机弹幕监听 WebSocket</option>
+          <option value="webhook">webhook · 外部监听器 POST 到 /api/event</option>
+          <option value="off">off · 关闭</option>
+        </select>
+        <p class="field-hint" id="dyModeTip"></p>
+        <label>直播间地址（live 模式，形如 https://live.douyin.com/123456789）</label>
+        <input id="dyLive" placeholder="https://live.douyin.com/123456789">
+        <label>弹幕桥地址（bridge 模式）</label>
+        <input id="dyUrl" value="ws://127.0.0.1:8888">
+        <label>抖音直播间号（记录用）</label>
+        <input id="dyRoom" placeholder="123456789">
+        <label>登录 Cookie（可选：礼物一直收不到时填，浏览器 F12 → 网络 → 复制整段 Cookie）</label>
+        <input id="dyCookie" type="password" autocomplete="off" placeholder="留空 = 匿名连接（部分房间只推 进场/点赞/弹幕，不推礼物）">
+        <div class="row">
+          <button class="btn primary" id="dyStart">启动数据源</button>
+          <button class="btn ghost" id="dyStop">停止</button>
+        </div>
+        <div class="dy-status" id="dyStatus"></div>
+        <p class="field-hint" id="dyHint"></p>
+        <div class="hint-box">
+          <b>live 模式怎么用</b>
+          <ol>
+            <li>把要接的直播间地址（开播中）填到上面，例如 <code>https://live.douyin.com/123456789</code>。</li>
+            <li>点「启动数据源」，服务端会自己拿 ttwid、算 signature / a_bogus、连抖音的弹幕 WebSocket，
+                解 protobuf，把聊天 / 礼物 / 进场 / 点赞 / 关注 转成本项目事件。</li>
+            <li>断线自动重连；状态里能看到「已连接 / 收到消息 N 条 / 最近一条」。</li>
+          </ol>
+          <p>bridge / webhook 是给「已经有自己的弹幕监听器」的人用的，事件格式：</p>
+          <pre>{"kind":"comment","username":"观众","text":"你好","event_id":"唯一ID"}
+{"kind":"gift","username":"观众","gift":"小心心","count":1}
+{"kind":"follow","username":"观众"}
+{"kind":"enter","username":"观众"}</pre>
+        </div>
+      </div>
+
+      <!-- 模型 -->
+      <div class="tab-body" data-body="model">
+        <div class="row2">
+          <div>
+            <label>API Key</label>
+            <input id="apiKey" type="password" autocomplete="off" placeholder="sk-...">
+            <div class="field-hint" id="keyHint">只保存在本机 settings.json</div>
+          </div>
+          <div>
+            <label>模型名称</label>
+            <input id="model" value="deepseek-chat" list="modelList">
+            <datalist id="modelList">
+              <option value="deepseek-chat"></option>
+              <option value="deepseek-reasoner"></option>
+              <option value="qwen-plus"></option>
+              <option value="glm-4-flash"></option>
+            </datalist>
+          </div>
+        </div>
+        <label>API 地址（兼容 OpenAI /chat/completions）</label>
+        <input id="baseUrl" value="https://api.deepseek.com/v1">
+        <div class="row2">
+          <div>
+            <label>语音音色</label>
+            <select id="voice">
+              <option value="zh-CN-XiaoxiaoNeural">晓晓 · 温柔</option>
+              <option value="zh-CN-XiaoyiNeural">晓伊 · 少女</option>
+              <option value="zh-CN-liaoning-XiaobeiNeural">晓北 · 东北甜妹</option>
+              <option value="zh-CN-YunxiNeural">云希 · 男声</option>
+              <option value="zh-TW-HsiaoChenNeural">晓臻 · 台湾</option>
+              <option value="zh-HK-HiuMaanNeural">曉曼 · 粤语</option>
+            </select>
+          </div>
+          <div>
+            <label>动图素材</label>
+            <select id="gifTheme">
+              <option value="webp">透明底动态 WebP（推荐，OBS 更稳）</option>
+              <option value="gif">原始 GIF 原画（带白底）</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>语速</label>
+            <select id="rate">
+              <option value="-10%">慢 -10%</option>
+              <option value="+0%">正常</option>
+              <option value="+4%">稍快 +4%</option>
+              <option value="+10%">快 +10%</option>
+            </select>
+          </div>
+          <div>
+            <label>音调</label>
+            <select id="pitch">
+              <option value="-4Hz">偏低</option>
+              <option value="+0Hz">自然</option>
+              <option value="+3Hz">甜一点 +3Hz</option>
+              <option value="+8Hz">更甜 +8Hz</option>
+            </select>
+          </div>
+        </div>
+        <label>人设（决定鲸宝怎么说话，留空 = 用内置的「打工大肥鲸」）</label>
+        <textarea id="persona" rows="5" placeholder="留空就使用内置默认人设「打工大肥鲸」：不装、敢冲、嘴贫但靠谱，短句为主、不超过 25 字、giao 当标点。"></textarea>
+        <div class="row">
+          <button class="btn primary" id="saveCfg">保存配置</button>
+          <button class="btn" id="testCfg">测试模型连接</button>
+          <button class="btn" id="previewTts">试听音色</button>
+          <button class="btn ghost" id="clearKey">清除密钥（本地话术）</button>
+          <button class="btn ghost" id="resetPersona" title="清空自定义人设，回到内置默认">人设恢复默认</button>
+        </div>
+        <div class="field-hint" id="personaHint"></div>
+        <div class="cfg-result" id="cfgResult"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 事件流 -->
+  <section class="col event-col">
+    <div class="card grow">
+      <div class="card-head"><span>直播间事件流</span><span class="pill" id="evCount">0</span></div>
+      <div class="events" id="events"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/console.js"></script>
+</body>
+</html>

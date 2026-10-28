@@ -1,0 +1,7 @@
+edge-tts>=7.0.0
+websocket-client>=1.7.0
+requests>=2.31.0
+betterproto>=1.2.5
+py-mini-racer>=0.6.0
+PyExecJS>=1.5.1
+protobuf>=3.20.0

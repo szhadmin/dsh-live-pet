@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大肥鲸 · 打工仔直播舞台</title>
+<link rel="stylesheet" href="/stage.css">
+</head>
+<body class="stage">
+<div class="frame" id="frame">
+  <div class="bg">
+    <div class="glow"></div>
+    <div class="rays"></div>
+    <div class="deco">
+      <!-- 房间：深海工位的客厅家具（纯 CSS，都在内容层后面） -->
+      <div class="bunting"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="pendant pd1"></div>
+      <div class="pendant pd2"></div>
+      <div class="chandelier"><span></span><span></span><span></span></div>
+      <div class="porthole ph1"></div>
+      <div class="porthole ph2"></div>
+      <div class="door"><i>营业中</i></div>
+      <div class="shelf"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="painting"></div>
+      <div class="counter"><span class="mug"></span><span class="mug"></span><span class="jar"></span></div>
+      <div class="stool st1"></div>
+      <div class="stool st2"></div>
+      <div class="table"><span class="plate"></span><span class="candle"></span></div>
+      <div class="chair ch1"></div>
+      <div class="chair ch2"></div>
+      <div class="tank"><i></i><i></i><i></i></div>
+      <div class="rug"></div>
+      <!-- 客厅：沙发 / 电视 / 茶几 / 电脑桌 / 壁画 / 落地灯 -->
+      <div class="pendant pd3"></div>
+      <div class="mural m1"></div>
+      <div class="mural m2"></div>
+      <div class="tv"><span class="tv-live">LIVE</span><i class="tv-whale"></i></div>
+      <div class="floor-lamp"></div>
+      <div class="sofa"><i class="cushion c1"></i><i class="cushion c2"></i><i class="cushion c3"></i></div>
+      <div class="coffee-table"><span class="cup"></span><span class="remote"></span><span class="book"></span></div>
+      <div class="desk">
+        <span class="monitor"><i class="code"></i></span>
+        <span class="keyboard"></span>
+        <span class="tower"></span>
+        <span class="desk-lamp"></span>
+      </div>
+      <div class="menu-board"><b>今日 KPI</b><i>token · 礼物 · bug</i></div>
+      <div class="neon-sign">打&nbsp;工&nbsp;中</div>
+      <div class="seaweed sw1"></div>
+      <div class="seaweed sw2"></div>
+      <div class="seaweed sw3"></div>
+      <div class="seaweed sw4"></div>
+      <div class="seaweed sw5"></div>
+      <div class="coral co1"></div>
+      <div class="coral co2"></div>
+      <div class="coral co3"></div>
+      <div class="coral co4"></div>
+      <div class="starfish st1"></div>
+      <div class="starfish st2"></div>
+      <div class="shell sh1"></div>
+      <div class="shell sh2"></div>
+      <div class="rock rk1"></div>
+      <div class="rock rk2"></div>
+      <div class="jelly je1"></div>
+      <div class="jelly je2"></div>
+      <div class="jelly je3"></div>
+      <div class="fish fi1"></div>
+      <div class="fish fi2"></div>
+      <div class="fish fi3"></div>
+      <div class="fish fi4"></div>
+      <div class="plankton" id="plankton"></div>
+      <div class="sparkles" id="sparkles"></div>
+    </div>
+    <div class="bubbles" id="bubbles"></div>
+    <div class="seafloor"></div>
+    <div class="vignette"></div>
+    <div class="fx-layer" id="fxLayer"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <div class="brand-text">
+        <div class="brand-line">
+          <b id="hostName">大肥鲸</b>
+          <i class="brand-tag">打工仔</i>
+        </div>
+        <small id="brandTag">FAT WHALE LIVE · 深海工位</small>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="live"><i></i>LIVE</span>
+      <span class="pill" id="clock">00:00</span>
+    </div>
+  </header>
+
+  <div class="hud">
+    <div class="hud-item"><small>互动</small><b id="requests">0</b></div>
+    <div class="hud-item"><small>礼物</small><b id="gifts">0</b></div>
+    <div class="hud-item"><small>收入</small><b id="income">¥0</b></div>
+    <div class="hud-item"><small>TOKEN</small><b id="tokens">0</b></div>
+    <div class="hud-item"><small>记忆</small><b id="facts">0</b></div>
+  </div>
+
+  <main class="stage-main">
+    <div class="left-col">
+      <aside class="panel gift-menu" id="giftMenuPanel" hidden>
+        <div class="panel-head"><span class="dot gold"></span>刷礼菜单<em>送我就演</em></div>
+        <ul class="gift-menu-list" id="giftMenuList"></ul>
+      </aside>
+
+      <aside class="panel danmu-panel">
+        <div class="panel-head"><span class="dot"></span>弹幕池<em id="danmuCount">0</em></div>
+        <ul class="danmu-list" id="danmuList"><li class="empty">等一条弹幕…</li></ul>
+      </aside>
+    </div>
+
+    <div class="right-col">
+      <div class="whale-zone">
+        <div class="halo"></div>
+        <div class="whale-stack" id="whaleStack">
+          <img class="whale" id="whaleA" alt="大肥鲸" src="/gifs/stage/whale_walking.webp">
+          <img class="whale fade" id="whaleB" alt="">
+          <div class="whale-shadow"></div>
+        </div>
+        <div class="gift-banner" id="giftBanner"></div>
+        <div class="action-tip" id="actionTip"></div>
+      </div>
+
+      <section class="bubble">
+        <div class="bubble-who"><span id="bubbleWho">大肥鲸</span><i class="bubble-tag" id="bubbleTag">待机</i></div>
+        <p class="bubble-text" id="bubbleText">发条弹幕，我记住你。</p>
+      </section>
+
+      <aside class="panel song-panel">
+        <div class="panel-head"><span class="dot gold"></span>点歌台<em id="songCount">0</em></div>
+        <div class="now-playing" id="nowPlaying">
+          <div class="np-empty">还没有人点歌 · 送礼点歌</div>
+        </div>
+        <ul class="song-queue" id="songQueue"></ul>
+      </aside>
+    </div>
+  </main>
+
+  <button class="sound-gate" id="soundGate" hidden>点击开启直播声音</button>
+  <audio id="voiceAudio" preload="auto"></audio>
+  <audio id="musicAudio" preload="auto"></audio>
+</div>
+<script src="/stage.js"></script>
+</body>
+</html>

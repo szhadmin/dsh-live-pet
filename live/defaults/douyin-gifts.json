@@ -1,0 +1,1096 @@
+{
+  "source": "https://live.douyin.com/webcast/gift/list/",
+  "note": "抖币→人民币按 10 抖币=1 元 折算；图标版权归抖音所有，仅供本机直播展示用",
+  "fetched_at": "2026-10-27 16:44:12",
+  "gifts": [
+    {
+      "id": "13857",
+      "name": "1.2倍加成卡-嘉年华",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/cdc1e56b70ca0c6ebe6f38adb4ac651a.png~tplv-obj.png",
+      "describe": "送出1.2倍加成卡-嘉年华",
+      "icon": "13857.png"
+    },
+    {
+      "id": "16504",
+      "name": "为你打call",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/bbb74783a83471a3a0b312f0bc5cecdc.png~tplv-obj.png",
+      "describe": "送出为你打call",
+      "icon": "16504.png"
+    },
+    {
+      "id": "3475",
+      "name": "周年蛋糕",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/f681afb4be36d8a321eac741d387f1e2.png~tplv-obj.png",
+      "describe": "祝你周年快乐！",
+      "icon": "3475.png"
+    },
+    {
+      "id": "463",
+      "name": "小心心",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/7ef47758a435313180e6b78b056dda4e.png~tplv-obj.png",
+      "describe": "送出小心心",
+      "icon": "463.png"
+    },
+    {
+      "id": "6901",
+      "name": "庆祝蛋糕",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/f681afb4be36d8a321eac741d387f1e2.png~tplv-obj.png",
+      "describe": "送出庆祝蛋糕",
+      "icon": "6901.png"
+    },
+    {
+      "id": "12399",
+      "name": "新buff抖音一号",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/d9e238d251f023825face1d7e73ea27d.png~tplv-obj.png",
+      "describe": "送出新buff抖音一号",
+      "icon": "12399.png"
+    },
+    {
+      "id": "2001",
+      "name": "玫瑰",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/96e9bc9717d926732e37351fae827813.png~tplv-obj.png",
+      "describe": "送了一支玫瑰",
+      "icon": "2001.png"
+    },
+    {
+      "id": "11968",
+      "name": "生日蛋糕",
+      "diamond": 1,
+      "cny": 0.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/12e95a465becf7c22ca24526fb3432db.png~tplv-obj.png",
+      "describe": "送出生日蛋糕",
+      "icon": "11968.png"
+    },
+    {
+      "id": "3481",
+      "name": "你最好看",
+      "diamond": 2,
+      "cny": 0.2,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/4960c39f645d524beda5d50dc372510e.png~tplv-obj.png",
+      "describe": "送出你最好看",
+      "icon": "3481.png"
+    },
+    {
+      "id": "2002",
+      "name": "大啤酒",
+      "diamond": 2,
+      "cny": 0.2,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/71801c53df3977b1470ac2afb8250ac1.png~tplv-obj.png",
+      "describe": "送了一杯大啤酒",
+      "icon": "2002.png"
+    },
+    {
+      "id": "165",
+      "name": "棒棒糖",
+      "diamond": 9,
+      "cny": 0.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/2756f07818a73a8c79f024e959665110.png~tplv-obj.png",
+      "describe": "送出棒棒糖",
+      "icon": "165.png"
+    },
+    {
+      "id": "2006",
+      "name": "鲜花",
+      "diamond": 10,
+      "cny": 1.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/42d4cd329e5c01be43c3432567847507.png~tplv-obj.png",
+      "describe": "送了一捧鲜花",
+      "icon": "2006.png"
+    },
+    {
+      "id": "3597",
+      "name": "加油鸭",
+      "diamond": 15,
+      "cny": 1.5,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c169b7ff42cb389d73878e87594c7846.png~tplv-obj.png",
+      "describe": "送出加油鸭",
+      "icon": "3597.png"
+    },
+    {
+      "id": "3620",
+      "name": "送你花花",
+      "diamond": 49,
+      "cny": 4.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/6cc748756a40332fd73b981b742d6ed7.png~tplv-obj.png",
+      "describe": "送出送你花花",
+      "icon": "3620.png"
+    },
+    {
+      "id": "5357",
+      "name": "甜甜圈",
+      "diamond": 52,
+      "cny": 5.2,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/39570ab4853fc7c2f0f467e25a82bc2c.png~tplv-obj.png",
+      "describe": "送出甜甜圈",
+      "icon": "5357.png"
+    },
+    {
+      "id": "918",
+      "name": "66个小心心",
+      "diamond": 66,
+      "cny": 6.6,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/be28fa14d26d63211fa7c4ba7b839141~tplv-obj.png",
+      "describe": "触发赠送了66个小心心特效",
+      "icon": "918.png"
+    },
+    {
+      "id": "14907",
+      "name": "为你比心",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c5ca008f041d32c73a51e1344de4e515.png~tplv-obj.png",
+      "describe": "",
+      "icon": "14907.png"
+    },
+    {
+      "id": "10559",
+      "name": "兔兔甜甜圈",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/447c4597111efacb6a48d9bfa25315f8.png~tplv-obj.png",
+      "describe": "",
+      "icon": "10559.png"
+    },
+    {
+      "id": "10572",
+      "name": "喝杯咖啡",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/81a194d823b6f7235e8fe5b2600667a0.png~tplv-obj.png",
+      "describe": "",
+      "icon": "10572.png"
+    },
+    {
+      "id": "10500",
+      "name": "心动玫瑰",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/725d8fd74986c316b04563bb4e7131b5.png~tplv-obj.png",
+      "describe": "送出心动玫瑰",
+      "icon": "10500.png"
+    },
+    {
+      "id": "10428",
+      "name": "拍拍小手",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/38b2d27bb79006c4e2f36907770b4a5c.png~tplv-obj.png",
+      "describe": "",
+      "icon": "10428.png"
+    },
+    {
+      "id": "16106",
+      "name": "摸摸头",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/0dffafbff33480f18128077cd7ca0523.png~tplv-obj.png",
+      "describe": "送出摸摸头",
+      "icon": "16106.png"
+    },
+    {
+      "id": "11436",
+      "name": "星星魔法棒",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/411e10eee27f5d85befb36a6467a562e.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11436.png"
+    },
+    {
+      "id": "11273",
+      "name": "玫瑰之恋",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/cfb18800fb542c87555bcc8e8bb9b145.png~tplv-obj.png",
+      "describe": "送出玫瑰之恋",
+      "icon": "11273.png"
+    },
+    {
+      "id": "11964",
+      "name": "白天鹅蛋糕",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/6503f9724ed9f07c7d2befed09d293f1.png~tplv-obj.png",
+      "describe": "送出白天鹅蛋糕",
+      "icon": "11964.png"
+    },
+    {
+      "id": "12982",
+      "name": "第一杯奶茶",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/f3898a89da34a0d3d57a25ab609a7124.png~tplv-obj.png",
+      "describe": "送出第一杯奶茶",
+      "icon": "12982.png"
+    },
+    {
+      "id": "15989",
+      "name": "纸飞机",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/4cd4255a8a3c418a830ca628dbeaff05.png~tplv-obj.png",
+      "describe": "送出纸飞机",
+      "icon": "15989.png"
+    },
+    {
+      "id": "10573",
+      "name": "肥牛火锅",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/aee6905ae92f76f619edcfc5fc574e3e.png~tplv-obj.png",
+      "describe": "",
+      "icon": "10573.png"
+    },
+    {
+      "id": "10682",
+      "name": "草莓蛋糕",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/e1b4587ee0fa5654a9dcf906341df897.png~tplv-obj.png",
+      "describe": "送出草莓蛋糕",
+      "icon": "10682.png"
+    },
+    {
+      "id": "12778",
+      "name": "豪华蛋糕",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/1301c3b60912d064067408a1a953a1db.png~tplv-obj.png",
+      "describe": "送出豪华蛋糕",
+      "icon": "12778.png"
+    },
+    {
+      "id": "10571",
+      "name": "赠你玫瑰",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/9474e6b08c3d5674d0d455fd9f6a3a2e.png~tplv-obj.png",
+      "describe": "",
+      "icon": "10571.png"
+    },
+    {
+      "id": "21052",
+      "name": "送你糖果",
+      "diamond": 99,
+      "cny": 9.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/3067945deed616202d29798b31e2e04f.png~tplv-obj.png",
+      "describe": "送出送你糖果",
+      "icon": "21052.png"
+    },
+    {
+      "id": "2481",
+      "name": "99啤酒",
+      "diamond": 198,
+      "cny": 19.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/5b55365e2653134d135826f17f2edf91~tplv-obj.png",
+      "describe": "触发赠送了99杯啤酒特效",
+      "icon": "2481.png"
+    },
+    {
+      "id": "15769",
+      "name": "可爱花束",
+      "diamond": 199,
+      "cny": 19.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/78232b6df8c3ad5550cc6387cd4e31db.png~tplv-obj.png",
+      "describe": "送出可爱花束",
+      "icon": "15769.png"
+    },
+    {
+      "id": "11443",
+      "name": "晚安星星",
+      "diamond": 199,
+      "cny": 19.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/819ddfda62ac09b10b354365ed1a7812.png~tplv-obj.png",
+      "describe": "送出晚安星星",
+      "icon": "11443.png"
+    },
+    {
+      "id": "11846",
+      "name": "板栗抱抱桶",
+      "diamond": 199,
+      "cny": 19.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/26d0981866774a2226b6bd1b2ca795e7.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11846.png"
+    },
+    {
+      "id": "781",
+      "name": "比心",
+      "diamond": 199,
+      "cny": 19.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/cdcbcb5aac6b81c5becb69cfe8589100.png~tplv-obj.png",
+      "describe": "送出比心",
+      "icon": "781.png"
+    },
+    {
+      "id": "4641",
+      "name": "星星点灯",
+      "diamond": 268,
+      "cny": 26.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c1ab40e19552d2df3840d23b3d4b560b.png~tplv-obj.png",
+      "describe": "送出星星点灯",
+      "icon": "4641.png"
+    },
+    {
+      "id": "10395",
+      "name": "爱的抱抱",
+      "diamond": 288,
+      "cny": 28.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c41fbf9f793bc17bcb17190998e5b6e4.png~tplv-obj.png",
+      "describe": "送出爱的抱抱",
+      "icon": "10395.png"
+    },
+    {
+      "id": "10365",
+      "name": "要喝奶茶",
+      "diamond": 288,
+      "cny": 28.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/e1161a70241ccd5ebd3b2014ae25ed2a.png~tplv-obj.png",
+      "describe": "送出要喝奶茶",
+      "icon": "10365.png"
+    },
+    {
+      "id": "11851",
+      "name": "一起恰火锅",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/b73f0ce5255915dcab7dc594c309d97e.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11851.png"
+    },
+    {
+      "id": "13008",
+      "name": "七夕限定比心兔兔",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/88e715800a659448c1be06fa197e9747.png~tplv-obj.png",
+      "describe": "送出七夕限定比心兔兔",
+      "icon": "13008.png"
+    },
+    {
+      "id": "11856",
+      "name": "开心拍拍拍",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/eb4e7f2b2df752153ab64c2bd22456f1.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11856.png"
+    },
+    {
+      "id": "21042",
+      "name": "抱抱小鸡",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/0d915f1092c62fce3fb2ddc71641279c.png~tplv-obj.png",
+      "describe": "送出抱抱小鸡",
+      "icon": "21042.png"
+    },
+    {
+      "id": "11765",
+      "name": "掉星星啦",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/21f980cbd64633c4391039e3afc7a7a3.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11765.png"
+    },
+    {
+      "id": "15474",
+      "name": "星星弹",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/9664037cc42ae8991851e77d072393ee.png~tplv-obj.png",
+      "describe": "送出星星弹",
+      "icon": "15474.png"
+    },
+    {
+      "id": "3780",
+      "name": "比心兔兔",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/ee63c6876bc4f924f4c90f59575b9599.png~tplv-obj.png",
+      "describe": "送出比心兔兔",
+      "icon": "3780.png"
+    },
+    {
+      "id": "13272",
+      "name": "甄爱比心兔兔",
+      "diamond": 299,
+      "cny": 29.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/68f92257356f69e0ab134eaff4e0a631.png~tplv-obj.png",
+      "describe": "送出甄爱比心兔兔",
+      "icon": "13272.png"
+    },
+    {
+      "id": "6028",
+      "name": "玫瑰小熊",
+      "diamond": 314,
+      "cny": 31.4,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/86e551c15a7281c2852d9a746ed95fe1.png~tplv-obj.png",
+      "describe": "",
+      "icon": "6028.png"
+    },
+    {
+      "id": "5701",
+      "name": "冰蓝玫瑰",
+      "diamond": 366,
+      "cny": 36.6,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/404f3ab5afce5b8a426b918274966ee3.png~tplv-obj.png",
+      "describe": "送出冰蓝玫瑰",
+      "icon": "5701.png"
+    },
+    {
+      "id": "5633",
+      "name": "真爱玫瑰",
+      "diamond": 366,
+      "cny": 36.6,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/beee3ed768da9902677c5390371df6d8.png~tplv-obj.png",
+      "describe": "送出真爱玫瑰",
+      "icon": "5633.png"
+    },
+    {
+      "id": "915",
+      "name": "520个小心心",
+      "diamond": 520,
+      "cny": 52.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/be28fa14d26d63211fa7c4ba7b839141~tplv-obj.png",
+      "describe": "触发赠送了520个小心心特效",
+      "icon": "915.png"
+    },
+    {
+      "id": "11305",
+      "name": "火烧玫瑰",
+      "diamond": 520,
+      "cny": 52.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/1650d6409ccbf7914c54ad387dcf0378.png~tplv-obj.png",
+      "describe": "送出火烧玫瑰",
+      "icon": "11305.png"
+    },
+    {
+      "id": "3773",
+      "name": "热气球",
+      "diamond": 520,
+      "cny": 52.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/0e176c2d0ac040ae0cad13d100f61b02.png~tplv-obj.png",
+      "describe": "送出热气球",
+      "icon": "3773.png"
+    },
+    {
+      "id": "2484",
+      "name": "玫瑰520",
+      "diamond": 520,
+      "cny": 52.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/d98e3feb565fece8141bc0ad08dac848~tplv-obj.png",
+      "describe": "触发赠送了520朵玫瑰特效",
+      "icon": "2484.png"
+    },
+    {
+      "id": "11832",
+      "name": "冰冻玫瑰",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/20905754df42be5c7e9aac7991901ec8.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11832.png"
+    },
+    {
+      "id": "11787",
+      "name": "吃泡面",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/36720a542258ce9486f6a17ce231fbcd.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11787.png"
+    },
+    {
+      "id": "12855",
+      "name": "夜光玫瑰",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/ab1d6ea5bcc630d4c9a338409a7c0cf6.png~tplv-obj.png",
+      "describe": "送出夜光玫瑰",
+      "icon": "12855.png"
+    },
+    {
+      "id": "3382",
+      "name": "浪漫花火",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/1797d95a124cd5db4b6c5f2ebf0e8a0f~tplv-obj.png",
+      "describe": "送出浪漫花火",
+      "icon": "3382.png"
+    },
+    {
+      "id": "15498",
+      "name": "蝶影玫瑰",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/cd41fdc2c3dc1ff7d826243f62b367a5.png~tplv-obj.png",
+      "describe": "送出蝶影玫瑰",
+      "icon": "15498.png"
+    },
+    {
+      "id": "11651",
+      "name": "魔法玫瑰",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/480853d133912a0d256b91ffcc23d4b6.png~tplv-obj.png",
+      "describe": "送出魔法玫瑰",
+      "icon": "11651.png"
+    },
+    {
+      "id": "11496",
+      "name": "鲜花速递",
+      "diamond": 599,
+      "cny": 59.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/83cd0054704b82d05f00d31bfd2f8f9e.png~tplv-obj.png",
+      "describe": "",
+      "icon": "11496.png"
+    },
+    {
+      "id": "6952",
+      "name": "钻石飞机",
+      "diamond": 600,
+      "cny": 60.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/3734f33bbf5eb3233eaeda77be1fb825.png~tplv-obj.png",
+      "describe": "送出钻石飞机",
+      "icon": "6952.png"
+    },
+    {
+      "id": "4644",
+      "name": "万象烟花",
+      "diamond": 688,
+      "cny": 68.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/a53109a35f0b3c8be3f4cc38bc12b8cc.png~tplv-obj.png",
+      "describe": "送出万象烟花",
+      "icon": "4644.png"
+    },
+    {
+      "id": "5465",
+      "name": "烟花棒",
+      "diamond": 688,
+      "cny": 68.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/dec9b8eb97350db33d5e6dc52c0268c7.png~tplv-obj.png",
+      "describe": "送出烟花棒",
+      "icon": "5465.png"
+    },
+    {
+      "id": "2479",
+      "name": "玫瑰999",
+      "diamond": 999,
+      "cny": 99.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/d98e3feb565fece8141bc0ad08dac848~tplv-obj.png",
+      "describe": "触发赠送了999朵玫瑰特效",
+      "icon": "2479.png"
+    },
+    {
+      "id": "16179",
+      "name": "甜心跑车",
+      "diamond": 1200,
+      "cny": 120.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/e91a9e1d2baee4f9f32d980f63561daa.png~tplv-obj.png",
+      "describe": "送出甜心跑车",
+      "icon": "16179.png"
+    },
+    {
+      "id": "15738",
+      "name": "豪华跑车",
+      "diamond": 1200,
+      "cny": 120.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/6d367c66a7a72926bfdf8bfe2ec0fe1f.png~tplv-obj.png",
+      "describe": "送出豪华跑车",
+      "icon": "15738.png"
+    },
+    {
+      "id": "4353",
+      "name": "跑车",
+      "diamond": 1200,
+      "cny": 120.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/a44104d2d61cc1868495ea9a58ced24f.png~tplv-obj.png",
+      "describe": "送出跑车",
+      "icon": "4353.png"
+    },
+    {
+      "id": "15016",
+      "name": "跑车·GT",
+      "diamond": 1200,
+      "cny": 120.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/7a164049c60c0ca3db1f82dc0ebb8e5e.png~tplv-obj.png",
+      "describe": "送出跑车·GT",
+      "icon": "15016.png"
+    },
+    {
+      "id": "15017",
+      "name": "跑车·糖霸天下",
+      "diamond": 1200,
+      "cny": 120.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/7a164049c60c0ca3db1f82dc0ebb8e5e.png~tplv-obj.png",
+      "describe": "送出跑车·糖霸天下",
+      "icon": "15017.png"
+    },
+    {
+      "id": "15998",
+      "name": "七夕烟花",
+      "diamond": 1299,
+      "cny": 129.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/dd7578da9f8eb53fe844410f21a083d8.png~tplv-obj.png",
+      "describe": "送出七夕烟花",
+      "icon": "15998.png"
+    },
+    {
+      "id": "887",
+      "name": "1314个小心心",
+      "diamond": 1314,
+      "cny": 131.4,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/be28fa14d26d63211fa7c4ba7b839141~tplv-obj.png",
+      "describe": "触发赠送了1314个小心心特效",
+      "icon": "887.png"
+    },
+    {
+      "id": "15772",
+      "name": "烈焰花火",
+      "diamond": 1699,
+      "cny": 169.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/537399d9b524d153edf931cfb4883dad.png~tplv-obj.png",
+      "describe": "送出烈焰花火",
+      "icon": "15772.png"
+    },
+    {
+      "id": "15691",
+      "name": "一起比心",
+      "diamond": 1888,
+      "cny": 188.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/459a96d4df2606967f13160083163d9f.png~tplv-obj.png",
+      "describe": "送出一起比心",
+      "icon": "15691.png"
+    },
+    {
+      "id": "11437",
+      "name": "棋幻玫瑰",
+      "diamond": 1888,
+      "cny": 188.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/1f87048fe4d18ab3f565b0199ba2ba01.png~tplv-obj.png",
+      "describe": "送出棋幻玫瑰",
+      "icon": "11437.png"
+    },
+    {
+      "id": "6955",
+      "name": "钻石火箭",
+      "diamond": 2000,
+      "cny": 200.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/8f98689d868b7a0f38bfcbe23dcd738f.png~tplv-obj.png",
+      "describe": "送出钻石火箭",
+      "icon": "6955.png"
+    },
+    {
+      "id": "12981",
+      "name": "夏日干杯",
+      "diamond": 2299,
+      "cny": 229.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/0567e0cf7008f53fa45fee98ece59e13.png~tplv-obj.png",
+      "describe": "送出夏日干杯",
+      "icon": "12981.png"
+    },
+    {
+      "id": "11717",
+      "name": "天使之翼",
+      "diamond": 2888,
+      "cny": 288.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/2ce70744c9844ab41711bf759cd3324d.png~tplv-obj.png",
+      "describe": "送出天使之翼",
+      "icon": "11717.png"
+    },
+    {
+      "id": "805",
+      "name": "直升机",
+      "diamond": 2999,
+      "cny": 299.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/36cfaff119eac054390cf7cdfb3ab8c0~tplv-obj.png",
+      "describe": "送出直升机",
+      "icon": "805.png"
+    },
+    {
+      "id": "13012",
+      "name": "七夕限定嘉年华",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/db59141e64ebf2889cea84803878776a.png~tplv-obj.png",
+      "describe": "送出七夕限定嘉年华",
+      "icon": "13012.png"
+    },
+    {
+      "id": "13010",
+      "name": "七夕限定私人飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/dbf58026c84514e2708a1f747b95f15e.png~tplv-obj.png",
+      "describe": "送出七夕限定私人飞机",
+      "icon": "13010.png"
+    },
+    {
+      "id": "13540",
+      "name": "万圣私人飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/a3c92a8cfb6b03d53e29abfd073a3edf.png~tplv-obj.png",
+      "describe": "送出万圣私人飞机",
+      "icon": "13540.png"
+    },
+    {
+      "id": "3871",
+      "name": "告白飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/68a19ab54e1c7d236388d0ea5ade76f8.png~tplv-obj.png",
+      "describe": "送出告白飞机",
+      "icon": "3871.png"
+    },
+    {
+      "id": "13274",
+      "name": "甄爱私人飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/31bb97af1d7c9e70a8b4bc612bf40847.png~tplv-obj.png",
+      "describe": "送出甄爱私人飞机",
+      "icon": "13274.png"
+    },
+    {
+      "id": "3870",
+      "name": "碧空飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/6b46dd8506d9bfee3531e7f939420a48.png~tplv-obj.png",
+      "describe": "送出碧空飞机",
+      "icon": "3870.png"
+    },
+    {
+      "id": "3872",
+      "name": "神秘飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c647a9e620c966fad56f0a4397f0e6ef.png~tplv-obj.png",
+      "describe": "送出神秘飞机",
+      "icon": "3872.png"
+    },
+    {
+      "id": "3729",
+      "name": "私人飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/a7fd71b617f0770dc47f4a8939332e46.png~tplv-obj.png",
+      "describe": "送出私人飞机",
+      "icon": "3729.png"
+    },
+    {
+      "id": "15739",
+      "name": "豪华飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/01697676c975167f0d579ef559fa4f70.png~tplv-obj.png",
+      "describe": "送出豪华飞机",
+      "icon": "15739.png"
+    },
+    {
+      "id": "5955",
+      "name": "金色飞机",
+      "diamond": 3000,
+      "cny": 300.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/60f0308e3107a24520919cb4bcf0ca07.png~tplv-obj.png",
+      "describe": "送出金色飞机",
+      "icon": "5955.png"
+    },
+    {
+      "id": "15576",
+      "name": "玫瑰礼服",
+      "diamond": 4000,
+      "cny": 400.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/b031933b2c33358a09e3147c30ad3b34.png~tplv-obj.png",
+      "describe": "送出玫瑰礼服",
+      "icon": "15576.png"
+    },
+    {
+      "id": "14450",
+      "name": "花火之约",
+      "diamond": 4321,
+      "cny": 432.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/484e258f097cfb1b2f0c32a925b077c1.png~tplv-obj.png",
+      "describe": "送出花火之约",
+      "icon": "14450.png"
+    },
+    {
+      "id": "13276",
+      "name": "甄爱嘉年华",
+      "diamond": 5000,
+      "cny": 500.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/db59141e64ebf2889cea84803878776a.png~tplv-obj.png",
+      "describe": "送出甄爱嘉年华",
+      "icon": "13276.png"
+    },
+    {
+      "id": "6544",
+      "name": "玫瑰之约",
+      "diamond": 6000,
+      "cny": 600.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/e915cb32ccb84306bf2b2df0acd65dcc.png~tplv-obj.png",
+      "describe": "送出玫瑰之约",
+      "icon": "6544.png"
+    },
+    {
+      "id": "6957",
+      "name": "钻石嘉年华",
+      "diamond": 6000,
+      "cny": 600.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/def05bbbb2d0c0bf5053128d93385c61.png~tplv-obj.png",
+      "describe": "送出钻石嘉年华",
+      "icon": "6957.png"
+    },
+    {
+      "id": "12786",
+      "name": "星光玫瑰",
+      "diamond": 7500,
+      "cny": 750.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/d17c4363b22af9ff378e462c45789d90.png~tplv-obj.png",
+      "describe": "送出星光玫瑰",
+      "icon": "12786.png"
+    },
+    {
+      "id": "5665",
+      "name": "星际玫瑰",
+      "diamond": 7500,
+      "cny": 750.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/9ab1431823013eed082a3a9fc3c30ae5.png~tplv-obj.png",
+      "describe": "送出星际玫瑰",
+      "icon": "5665.png"
+    },
+    {
+      "id": "14615",
+      "name": "冰雪城堡",
+      "diamond": 8999,
+      "cny": 899.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/9091816e7bdb4efc5cbc306509cb6380.png~tplv-obj.png",
+      "describe": "送出冰雪城堡",
+      "icon": "14615.png"
+    },
+    {
+      "id": "15993",
+      "name": "玫瑰女王",
+      "diamond": 8999,
+      "cny": 899.9,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/fbda62f95880da3b9676fb10b7bfb3f4.png~tplv-obj.png",
+      "describe": "送出玫瑰女王",
+      "icon": "15993.png"
+    },
+    {
+      "id": "13013",
+      "name": "典藏版景泰蓝嘉年华",
+      "diamond": 9000,
+      "cny": 900.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/955b9f6e1048c5f39e7aff0f891995d2.png~tplv-obj.png",
+      "describe": "送出典藏版景泰蓝嘉年华",
+      "icon": "13013.png"
+    },
+    {
+      "id": "13011",
+      "name": "七夕限定抖音1号",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/ee8db7e50211b2e048a7189fd83308b8.png~tplv-obj.png",
+      "describe": "送出七夕限定抖音1号",
+      "icon": "13011.png"
+    },
+    {
+      "id": "13541",
+      "name": "万圣抖音一号",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/78824b7bfe1f06542ab44b2415086024.png~tplv-obj.png",
+      "describe": "送出万圣抖音一号",
+      "icon": "13541.png"
+    },
+    {
+      "id": "4457",
+      "name": "为爱启航",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/32b519902405bdd26787480ff9e6c7be.png~tplv-obj.png",
+      "describe": "送出为爱启航",
+      "icon": "4457.png"
+    },
+    {
+      "id": "511",
+      "name": "抖音1号",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/9ecb32b0e3b06401a1c762114478a539.png~tplv-obj.png",
+      "describe": "送出一枚宇宙无敌超级火箭",
+      "icon": "511.png"
+    },
+    {
+      "id": "6302",
+      "name": "抖音1号限定版",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/d9e238d251f023825face1d7e73ea27d.png~tplv-obj.png",
+      "describe": "送出抖音1号限定版",
+      "icon": "6302.png"
+    },
+    {
+      "id": "5174",
+      "name": "星际抖音1号",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/5b39aea0099a857423ee8b609cfb948e.png~tplv-obj.png",
+      "describe": "送出星际抖音1号",
+      "icon": "5174.png"
+    },
+    {
+      "id": "13275",
+      "name": "甄爱抖音一号",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/7f2c207556599d6aeb82d45d5831e9c3.png~tplv-obj.png",
+      "describe": "送出甄爱抖音一号",
+      "icon": "13275.png"
+    },
+    {
+      "id": "5606",
+      "name": "金色抖音1号",
+      "diamond": 10001,
+      "cny": 1000.1,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/4eab53e479022a1ac3c4943f9a5d63b3.png~tplv-obj.png",
+      "describe": "送出金色抖音1号",
+      "icon": "5606.png"
+    },
+    {
+      "id": "15759",
+      "name": "城堡告白",
+      "diamond": 15200,
+      "cny": 1520.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/3e3c861cef8bece01f2c881ec0e9f2c0.png~tplv-obj.png",
+      "describe": "送出城堡告白",
+      "icon": "15759.png"
+    },
+    {
+      "id": "15678",
+      "name": "城堡誓言",
+      "diamond": 15200,
+      "cny": 1520.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/119e6b3ab0fcd97b5eb5b8cf5c2765ad.png~tplv-obj.png",
+      "describe": "送出城堡誓言",
+      "icon": "15678.png"
+    },
+    {
+      "id": "11328",
+      "name": "鎏金玫瑰",
+      "diamond": 16666,
+      "cny": 1666.6,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/60ff7349049d15b59d8275fa80f4cf5e.png~tplv-obj.png",
+      "describe": "送出鎏金玫瑰",
+      "icon": "11328.png"
+    },
+    {
+      "id": "3544",
+      "name": "游艇派对",
+      "diamond": 18888,
+      "cny": 1888.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/eb480cf754c73c43f82c9091db5b5226.png~tplv-obj.png",
+      "describe": "送出游艇派对",
+      "icon": "3544.png"
+    },
+    {
+      "id": "3776",
+      "name": "梦幻城堡",
+      "diamond": 28888,
+      "cny": 2888.8,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/ca483c429fd4d36c87b94a0b2046d4cc.png~tplv-obj.png",
+      "describe": "邀你进入梦幻城堡",
+      "icon": "3776.png"
+    },
+    {
+      "id": "789",
+      "name": "嘉年华",
+      "diamond": 30000,
+      "cny": 3000.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c32f9ccf5304824dd050d6e77536a4ab.png~tplv-obj.png",
+      "describe": "为你营造浪漫嘉年华！",
+      "icon": "789.png"
+    },
+    {
+      "id": "5592",
+      "name": "浪漫嘉年华",
+      "diamond": 30000,
+      "cny": 3000.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/30e23cec771f43fcbd31dd4b19774cc0.png~tplv-obj.png",
+      "describe": "送出浪漫嘉年华",
+      "icon": "5592.png"
+    },
+    {
+      "id": "5180",
+      "name": "玫瑰庄园",
+      "diamond": 30000,
+      "cny": 3000.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/c4e245bab0c48777a001eca32dcc9053.png~tplv-obj.png",
+      "describe": "送出玫瑰庄园",
+      "icon": "5180.png"
+    },
+    {
+      "id": "5956",
+      "name": "金色嘉年华",
+      "diamond": 30000,
+      "cny": 3000.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/fdf3391f25c5a3e50077c86cc2f187c4.png~tplv-obj.png",
+      "describe": "送出金色嘉年华",
+      "icon": "5956.png"
+    },
+    {
+      "id": "3681",
+      "name": "告白花火",
+      "diamond": 0,
+      "cny": 0.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/b01b1ee7af3d074d481cc4f95a665bf5.png~tplv-obj.png",
+      "describe": "送出告白花火",
+      "icon": "3681.png"
+    },
+    {
+      "id": "3683",
+      "name": "春意花火",
+      "diamond": 0,
+      "cny": 0.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/a373e28537a66b92b57d23712060dc6a.png~tplv-obj.png",
+      "describe": "送出春意花火",
+      "icon": "3683.png"
+    },
+    {
+      "id": "3682",
+      "name": "梦幻花火",
+      "diamond": 0,
+      "cny": 0.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/03c642f9cbabbba0c3dfdb4e530bc59c.png~tplv-obj.png",
+      "describe": "送出梦幻花火",
+      "icon": "3682.png"
+    },
+    {
+      "id": "3680",
+      "name": "落日花火",
+      "diamond": 0,
+      "cny": 0.0,
+      "icon_url": "https://p3-webcast.douyinpic.com/img/webcast/0dbe5e99b3f8debdd24fd767cc4fa32d.png~tplv-obj.png",
+      "describe": "送出落日花火",
+      "icon": "3680.png"
+    }
+  ]
+}
