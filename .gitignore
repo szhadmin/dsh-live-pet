@@ -1,0 +1,10 @@
+# 运行期产物，不要提交
+live-data/
+*.log
+session.json
+pet-window.json
+config.json
+.poller-lock
+
+# 依赖
+node_modules/

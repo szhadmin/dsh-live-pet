@@ -1,0 +1,190 @@
+﻿# dsh-live-pet 的宠物 profile —— 「只看档」。
+#
+# 这份文件由插件在激活时自动写到 $DSH_HOME/profiles/<profile>/cordis.patch.yml，
+# 占位符来自直播服务的 settings.json（provider / model / base_url / api_key_env），
+# 所以模型路由永远和你正在用的那条一致。
+#
+# 权限口径：能看不能改。
+#   · sandbox-policy = read-only → 所有写入类操作（写文件、改配置、跑会落盘的命令）被沙箱拒绝
+#   · 保留：pwsh（查系统状态）、fs（读文件）、fs-search（glob/grep）、web（搜索/抓网页）
+#   · 关掉：写工具族之外的自动化（子智能体、工作流、目标、计划）、skill、bash
+
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: {{provider}}
+    model: "{{model}}"
+    reasoningEffort: "off"
+
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      {{provider}}:
+        displayName: live-pet
+        apiKeyEnv: {{apiKeyEnv}}
+        api: openai-completions
+        baseURL: "{{baseUrl}}"
+        models:
+          - id: "{{model}}"
+            name: "{{model}}"
+            contextWindow: 1000000
+            maxTokens: 32768
+            reasoningEfforts:
+              off: "none"
+              low: "low"
+              medium: "medium"
+              high: "high"
+
+# ── 只看档：沙箱锁死为只读 ──────────────────────────────────────────────
+# mode=read-only 管住沙箱，permission 预设管住「升级请求」：
+# 工具想申请 workspace-write 就得走审批，而这个 profile 里没有审批应答者，
+# 于是请求被拒 —— 模型只能看，不能改。
+- id: sandbox-policy
+  name: "@deepseek-ai/dsh-sandbox-policy"
+  config:
+    mode: read-only
+    workspaceRoot: "{{workspace}}"
+
+- id: approval
+  name: "@deepseek-ai/dsh-user-approval"
+  config:
+    policy: ask
+
+- id: permission
+  name: "@deepseek-ai/dsh-permission-presets"
+  config:
+    defaultPreset: look-only
+    presets:
+      look-only:
+        sandbox: read-only
+        approval: ask
+        name: look-only
+        description: "只读：能查系统状态、读文件、联网搜索；任何写入都要审批，而本 profile 没有应答者，所以一律被拒。"
+
+# ── 不给它的东西 ────────────────────────────────────────────────────────
+# shell 与文件写工具一律不加载：shell 的沙箱升级是模型自己申请的，子进程里没有
+# 审批应答者时会被放行，所以「只读」不能靠沙箱，得靠没有这个工具。
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-bash
+  disabled: true
+
+# tool-web 提供的 web_search 依赖未配置的 API key，模型会一直撞墙；整族摘掉，
+# 搜索与抓网页改由插件自带的 web_search_cn / web_fetch 提供（都不需要 key）。
+- id: tool-web
+  disabled: true
+
+- id: web-search-deepseek
+  disabled: true
+
+- id: web-deepseek-api
+  disabled: true
+
+- id: skill
+  disabled: true
+
+- id: skill-filesystem
+  disabled: true
+
+- id: tool-skill
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: tool-subagent-control
+  disabled: true
+
+- id: tool-subagent-list-agents
+  disabled: true
+
+- id: subagent
+  disabled: true
+
+- id: subagent-spawn-in-process
+  disabled: true
+
+- id: subagent-fork-in-process
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: workflow-ptc
+  disabled: true
+
+- id: ptc-runtime
+  disabled: true
+
+- id: tool-todo
+  disabled: true
+
+- id: tool-goal
+  disabled: true
+
+- id: goal
+  disabled: true
+
+- id: goal-round-driver
+  disabled: true
+
+- id: command-goal
+  disabled: true
+
+- id: plan-mode
+  disabled: true
+
+- id: mcp-resources
+  disabled: true
+
+# ── 本插件自带的只读工具：系统状态 + 读文本文件 ─────────────────────────
+# 新行必须写在 insert 下；写成 `- id: xxx` 只会去覆盖已存在的行。
+- insert:
+    - id: pet-tools
+      name: "{{toolsModule}}"
+      config:
+        workspace: "{{workspaceFwd}}"
+        pythonBin: "{{pythonBin}}"
+        apiBase: "{{apiBase}}"
+        stateDir: "{{stateDir}}"
+        skipCooldownSec: {{skipCooldownSec}}
+
+# ── 人设：鲸鱼主播，同时知道自己有几斤几两 ──────────────────────────────
+- id: system-prompt
+  config:
+    personaPrefix: |
+      你是抖音直播间里的「大肥鲸」，屏幕那头是真人观众，你说的话会被念出来；
+      同时还有一个「老板」（这台电脑的主人）会通过桌宠跟你打字。
+
+      # 说话方式
+      - 短句，一句一个意思，尽量不超过 25 字，口语，别念稿。
+      - 不用 Markdown、列表、编号、括号旁白、表情符号。
+      - 自称「我」，被问是谁就说「打工大肥鲸」。
+
+      # 你现在的权限（只看档）
+      - 你能看：这台电脑的系统状态、目录与文件内容、网页搜索结果。
+      - 你不能改：任何写文件、改配置、装东西、跑会落盘的操作都会被沙箱拒绝。
+        被要求做这些事时，直接说「我是只读权限，改不了，你自己动手或者给我开权限」，
+        不要假装做了，也不要绕着试。
+      - 老板让你查东西时，先真去查（拿命令/读文件/搜索），再用人话报结论；
+        查不到就说查不到。
+      - 联网怎么用：搜东西一律调 `web_search_cn`（免 key，360/Bing），
+        要看某个具体网页正文就调 `web_fetch`。没有别的搜索工具，
+        也不要凭印象说「我联网坏了」——你确实能搜，只要调对工具。
+      - 点歌台归你管：真有人想点歌就调 `song_request`，要你切歌就调 `song_skip`。
+        自己先判断意图，别靠字面关键词；只是夸歌好听、问放的是什么歌，就不要调工具。
+
+      # 输出
+      - 调用方要求「只输出一行 JSON」时，严格按它的字段输出，不要额外解释。
+
+    personaSuffix: |
+      出口前自查：是不是又在念稿？有没有编造没查到的数据？
+      涉及电脑状态时，数字必须来自你刚刚真的查到的结果。

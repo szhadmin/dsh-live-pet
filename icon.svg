@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Live stream pet">
+  <rect width="64" height="64" rx="14" fill="#101c2e"/>
+  <circle cx="32" cy="30" r="15" fill="#4aa8e0"/>
+  <path d="M17 30a15 15 0 0 1 15-15v30a15 15 0 0 1-15-15z" fill="#6fc0ee"/>
+  <path d="M46 27c3.2-3.4 8-5.2 9.8-2.6-2.2.8-3 3-3 5.4 2.4 1.5 2.6 4.1 4.7 5-3.3 2.3-9 .7-11.5-2.6z" fill="#3f92c8"/>
+  <circle cx="25" cy="27" r="2.4" fill="#101c2e"/>
+  <circle cx="25.8" cy="26.2" r="0.8" fill="#fff" opacity=".9"/>
+  <path d="M27 37c3 2 8 2 11 0-2 3.4-9 4-11 0z" fill="#d7ecfa"/>
+  <!-- speech bubble: the pet talks -->
+  <path d="M44 10h13a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4h-8l-4 4v-4h-1a4 4 0 0 1-4-4v-6a4 4 0 0 1 4-4z" fill="#f2f8fd" opacity=".92"/>
+  <circle cx="46.5" cy="17" r="1.5" fill="#3f92c8"/>
+  <circle cx="50.5" cy="17" r="1.5" fill="#3f92c8"/>
+  <circle cx="54.5" cy="17" r="1.5" fill="#3f92c8"/>
+</svg>

@@ -1,0 +1,12 @@
+# dsh-live-pet bundle patch
+#
+# 一行 Host 插件：轮询大肥鲸直播服务的弹幕，回复时驱动一条长 DSH 会话，
+# 用 Edge-TTS 合成语音，暴露 /dsh-live-pet/state，并拉起透明桌面宠物窗口。
+#
+# 这里用包名（dsh-live-pet）作为行名，装到 profile 的依赖里就能解析。
+# 如果你是直接解压目录、没装成包，把下面这行改成绝对路径即可：
+#   name: "F:/你的路径/dsh-live-pet/index.js"
+
+- insert:
+    - id: dsh-live-pet
+      name: "dsh-live-pet"
