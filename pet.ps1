@@ -626,8 +626,9 @@ function Wander-BeginMove {
     $extra = $script:BoardExtra
     if (-not $extra) { $extra = 0 }
     $dx = $script:WanderTargetX - ($script:Window.Left + $extra)
-    if ([Math]::Abs($dx) -gt 6) {
-        if ($dx -lt 0) { $script:Flip.ScaleX = -1.0 } else { $script:Flip.ScaleX = 1.0 }
+    if ([Math]::Abs($dx) -gt 4) {
+        # 素材默认朝左（尾巴甩在右后方），所以：往左走保持原样，往右走才镜像
+        if ($dx -gt 0) { $script:Flip.ScaleX = -1.0 } else { $script:Flip.ScaleX = 1.0 }
     }
     $script:WanderMoving = $true
     $script:WanderLastTick = $null
@@ -670,7 +671,8 @@ function Step-Wander {
         $script:WanderMoving = $false
         $script:WanderTimer.Stop()
         # 到了就换个心情歇一会儿，再继续溜达
-        $idle = @('happy', 'mischievous', 'eating', 'walking', 'unhappy') | Get-Random
+        # 停下来就别放走路动画了，换一个站立/生活类情绪（walking 看着像原地踏步）
+        $idle = @('happy', 'mischievous', 'eating', 'unhappy') | Get-Random
         Set-LocalEmotion $idle
         Save-Position
         Wander-ScheduleNext
