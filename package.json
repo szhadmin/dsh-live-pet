@@ -17,6 +17,7 @@
                   "cordis.patch.yml",
                   "profile",
                   "frames",
+                  "live",
                   "locale/*.json",
                   "icon.svg",
                   "README.md"
