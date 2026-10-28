@@ -11,6 +11,43 @@
 - 用只读工具查电脑状态、读文件、免 key 中文搜索
 - 在 **DSH → 设置 → 直播宠物** 里统一配置
 
+## 让 AI 帮你装（复制给 AI 用）
+
+> 把下面整段发给你的 AI 助手（DSH 自带的也行），**只需要把最后一行的房间号改成你自己的**。
+> AI 会自己装包、检查依赖、启动服务并逐条验收；唯一需要你动手的是中途重启一次 DSH。
+
+```
+请帮我把 DSH 插件 dsh-live-pet 装好并跑通。按顺序执行，每步都验证结果，失败就停下来说明原因，不要跳步。
+
+【1. 安装】
+  plugin_manager({ action: 'install_bundle', target: 'github:szhadmin/dsh-live-pet' })
+  plugin_manager({ action: 'set_bundle', target: 'dsh-live-pet', enabled: true })
+
+【2. 检查直播服务的 Python 依赖】
+  GET {DSH地址}/dsh-live-pet/deps
+  - missing 为空 → 继续下一步
+  - missing 非空 → POST {DSH地址}/dsh-live-pet/deps ，body {"action":"install"}；装完再 GET 一次确认 missing 为空
+  - pip 装不上（无网络/无权限）→ 把缺的包名告诉我，别继续
+
+【3. 让我重启一次 DSH】
+  设置页属于客户端模块，必须重启 DSH 后才会出现。重启完请确认设置里出现了「直播宠物」这一页。
+
+【4. 配置并启动】
+  - 「直播服务（插件托管）」保持开启 → 点「启动」→ 状态应显示运行中（127.0.0.1:8791）
+  - 「直播间地址」填 https://live.douyin.com/把这里换成我的房间号 → 保存
+
+【5. 验收（逐条把结果报给我）】
+  - GET {DSH地址}/dsh-live-pet/live → running = true
+  - GET http://127.0.0.1:8791/api/state → douyin.state = connected
+  - GET {DSH地址}/dsh-live-pet/state → status 是 idle / thinking / speaking（不是 offline）
+  - 桌面上有一只透明小鲸鱼，点一下弹输入条，打字能收到回复
+
+【6. 卡住时按这个顺序自查，并把结论告诉我】
+  - GET {DSH地址}/dsh-live-pet/log 的最后 20 行
+  - 插件目录下 live-pet.log、pet-window.log 的报错
+  - 8791 端口是否被占用（冲突就改 config.json 的 livePort）
+  - Python 是否在 PATH（不在就把 config.json 的 pythonBin 写成绝对路径）
+```
 ## 环境要求
 
 | 项 | 要求 |
