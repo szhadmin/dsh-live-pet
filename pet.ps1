@@ -123,8 +123,13 @@ $script:Image.HorizontalAlignment = 'Center'
 
 # 挤压回弹：以底部中心为原点
 $script:Squash = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+# 翻转（ScaleX = -1）和挤压是两套变换，合成一个组才不会互相覆盖
+$script:Flip = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+$script:ImageTransforms = New-Object System.Windows.Media.TransformGroup
+[void]$script:ImageTransforms.Children.Add($script:Squash)
+[void]$script:ImageTransforms.Children.Add($script:Flip)
 $script:Image.RenderTransformOrigin = [System.Windows.Point]::new(0.5, 1.0)
-$script:Image.RenderTransform = $script:Squash
+$script:Image.RenderTransform = $script:ImageTransforms
 
 $grid = New-Object System.Windows.Controls.Grid
 $rowBubble = New-Object System.Windows.Controls.RowDefinition
@@ -482,10 +487,33 @@ function Apply-State($state) {
         Set-PetState 'crying'
         return
     }
+    # 溜达配置由插件下发（每轮都读一次，改了设置立刻生效，不用重启窗口）
+    if ($state.PSObject.Properties.Name -contains 'wander') {
+        $w = $state.wander
+        $wasEnabled = $script:WanderEnabled
+        $script:WanderEnabled = [bool]$w.enabled
+        if ($null -ne $w.speed) { $script:WanderSpeed = [double]$w.speed }
+        if ($null -ne $w.dwellMinSec) { $script:WanderDwellMinMs = [int]([double]$w.dwellMinSec * 1000) }
+        if ($null -ne $w.dwellMaxSec) { $script:WanderDwellMaxMs = [int]([double]$w.dwellMaxSec * 1000) }
+        if ($script:WanderEnabled -and -not $wasEnabled) {
+            Write-PetLog 'wander enabled'
+            Wander-ScheduleNext
+        } elseif ((-not $script:WanderEnabled) -and $wasEnabled) {
+            Write-PetLog 'wander disabled'
+            Wander-Stop
+            Clear-LocalEmotion
+        }
+    }
+
     $emotion = [string]$state.emotion
     if ($script:Emotions -notcontains $emotion) { $emotion = 'walking' }
     if ([string]$state.status -eq 'thinking') { $emotion = 'coding' }
     if ([string]$state.status -eq 'offline') { $emotion = 'crying' }
+    # 正在溜达时动画交给溜达逻辑，别被状态里的情绪覆盖
+    if ($script:WanderMoving) { $emotion = 'walking' }
+    elseif ($script:LocalEmotion -ne '' -and (Get-Date) -lt $script:LocalEmotionUntil -and [string]$state.status -ne 'thinking') {
+        $emotion = $script:LocalEmotion
+    }
 
     $seq = [int]$state.seq
     if ($seq -eq $script:LastSeq) { return }
@@ -504,8 +532,167 @@ function Apply-State($state) {
     }
 }
 
+# ---------------------------------------------------------------- 自动溜达
+# 自己在桌面各处走动：随机挑目标 → 走过去 → 停一会儿 → 再挑下一个。
+# 用户一碰（点/拖/输入条）就暂停，别跟人抢窗口。
+$script:WanderEnabled = $true
+$script:WanderSpeed = 55.0
+$script:WanderDwellMinMs = 6000
+$script:WanderDwellMaxMs = 18000
+$script:WanderTargetX = 0.0
+$script:WanderTargetY = 0.0
+$script:WanderMoving = $false
+$script:WanderPausedUntil = [DateTime]::MinValue
+$script:WanderLastTick = $null
+$script:WanderIdleEmotion = 'happy'
+$script:LocalEmotion = ''
+$script:LocalEmotionUntil = [DateTime]::MinValue
+
+$script:WanderTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:WanderDwellTimer = New-Object System.Windows.Threading.DispatcherTimer
+
+function Wander-IsPaused {
+    if (-not $script:WanderEnabled) { return $true }
+    if ((Get-Date) -lt $script:WanderPausedUntil) { return $true }
+    if ($script:InputBorder.Visibility -eq 'Visible') { return $true }
+    return $false
+}
+
+function Wander-Pause([int]$Ms = 2500) {
+    $script:WanderPausedUntil = (Get-Date).AddMilliseconds($Ms)
+    $script:WanderMoving = $false
+    $script:WanderTimer.Stop()
+    $script:WanderDwellTimer.Stop()
+}
+
+function Wander-Stop {
+    $script:WanderMoving = $false
+    $script:WanderTimer.Stop()
+    $script:WanderDwellTimer.Stop()
+}
+
+function Set-LocalEmotion([string]$Name, [int]$HoldMs = 0) {
+    $script:LocalEmotion = $Name
+    if ($HoldMs -gt 0) {
+        $script:LocalEmotionUntil = (Get-Date).AddMilliseconds($HoldMs)
+    } else {
+        $script:LocalEmotionUntil = [DateTime]::MaxValue
+    }
+    Set-PetState $Name
+}
+
+function Clear-LocalEmotion {
+    $script:LocalEmotion = ''
+    $script:LocalEmotionUntil = [DateTime]::MinValue
+}
+
+function Get-PetBounds {
+    $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $extra = $script:BoardExtra
+    if (-not $extra) { $extra = 0 }
+    $width = $script:PetWidth
+    if (-not $width -or $width -lt 100) { $width = $script:Window.Width }
+    return @{
+        MinLeft = [double]$wa.Left
+        MaxLeft = [double]($wa.Right - $width)
+        MinTop = [double]$wa.Top
+        MaxTop = [double]($wa.Bottom - $script:Window.Height)
+    }
+}
+
+function Wander-PickTarget {
+    $bounds = Get-PetBounds
+    # 当前宠物本体的位置（窗口 left 里带了板子的偏移）
+    $extra = $script:BoardExtra
+    if (-not $extra) { $extra = 0 }
+    $curLeft = $script:Window.Left + $extra
+    $curTop = $script:Window.Top
+    $best = $null
+    for ($i = 0; $i -lt 12; $i++) {
+        $x = $bounds.MinLeft + (Get-Random -Minimum 0 -Maximum ([Math]::Max(1, [int]($bounds.MaxLeft - $bounds.MinLeft))))
+        $y = $bounds.MinTop + (Get-Random -Minimum 0 -Maximum ([Math]::Max(1, [int]($bounds.MaxTop - $bounds.MinTop))))
+        $distance = [Math]::Sqrt([Math]::Pow($x - $curLeft, 2) + [Math]::Pow($y - $curTop, 2))
+        $best = @{ X = [double]$x; Y = [double]$y }
+        if ($distance -gt 180) { break }
+    }
+    return $best
+}
+
+function Wander-BeginMove {
+    if (Wander-IsPaused) { return }
+    $target = Wander-PickTarget
+    $script:WanderTargetX = $target.X
+    $script:WanderTargetY = $target.Y
+    $extra = $script:BoardExtra
+    if (-not $extra) { $extra = 0 }
+    $dx = $script:WanderTargetX - ($script:Window.Left + $extra)
+    if ([Math]::Abs($dx) -gt 6) {
+        if ($dx -lt 0) { $script:Flip.ScaleX = -1.0 } else { $script:Flip.ScaleX = 1.0 }
+    }
+    $script:WanderMoving = $true
+    $script:WanderLastTick = $null
+    Set-LocalEmotion 'walking'
+    $script:WanderTimer.Start()
+    Write-PetLog ('wander -> {0},{1}' -f [int]$script:WanderTargetX, [int]$script:WanderTargetY)
+}
+
+function Wander-ScheduleNext {
+    $min = [Math]::Max(1500, $script:WanderDwellMinMs)
+    $max = [Math]::Max($min, $script:WanderDwellMaxMs)
+    $wait = Get-Random -Minimum $min -Maximum ($max + 1)
+    $script:WanderDwellTimer.Interval = [TimeSpan]::FromMilliseconds($wait)
+    $script:WanderDwellTimer.Start()
+}
+
+function Step-Wander {
+    if (-not $script:WanderMoving) { $script:WanderTimer.Stop(); return }
+    if (Wander-IsPaused) { Wander-Stop; return }
+    $now = Get-Date
+    if ($null -eq $script:WanderLastTick) { $script:WanderLastTick = $now; return }
+    $dt = ($now - $script:WanderLastTick).TotalSeconds
+    $script:WanderLastTick = $now
+    if ($dt -le 0) { return }
+    if ($dt -gt 0.35) { $dt = 0.35 }
+
+    $extra = $script:BoardExtra
+    if (-not $extra) { $extra = 0 }
+    $curX = $script:Window.Left + $extra
+    $curY = $script:Window.Top
+    $dx = $script:WanderTargetX - $curX
+    $dy = $script:WanderTargetY - $curY
+    $distance = [Math]::Sqrt($dx * $dx + $dy * $dy)
+    $speed = [Math]::Max(10.0, $script:WanderSpeed)
+    $step = $speed * $dt
+
+    if ($distance -le $step -or $distance -lt 2) {
+        $script:Window.Left = $script:WanderTargetX - $extra
+        $script:Window.Top = $script:WanderTargetY
+        $script:WanderMoving = $false
+        $script:WanderTimer.Stop()
+        # 到了就换个心情歇一会儿，再继续溜达
+        $idle = @('happy', 'mischievous', 'eating', 'walking', 'unhappy') | Get-Random
+        Set-LocalEmotion $idle
+        Save-Position
+        Wander-ScheduleNext
+        return
+    }
+
+    $nextX = $curX + ($dx / $distance) * $step
+    $nextY = $curY + ($dy / $distance) * $step
+    $script:Window.Left = $nextX - $extra
+    $script:Window.Top = $nextY
+}
+
+$script:WanderTimer.Interval = [TimeSpan]::FromMilliseconds(30)
+$script:WanderTimer.Add_Tick({ Step-Wander })
+$script:WanderDwellTimer.Add_Tick({
+    $script:WanderDwellTimer.Stop()
+    if (Wander-IsPaused) { return }
+    Wander-BeginMove
+})
 # ---------------------------------------------------------------- 交互
 $script:Window.Add_MouseLeftButtonDown({
+    Wander-Pause 4000
     Invoke-Squash
     $script:DownLeft = $script:Window.Left
     $script:DownTop = $script:Window.Top
@@ -513,6 +700,7 @@ $script:Window.Add_MouseLeftButtonDown({
     $moved = ([Math]::Abs($script:Window.Left - $script:DownLeft) -ge 3) -or ([Math]::Abs($script:Window.Top - $script:DownTop) -ge 3)
     if ($moved) {
         Save-Position
+        Wander-ScheduleNext
         return
     }
     if ($script:InputBorder.Visibility -eq 'Visible') {
@@ -592,6 +780,16 @@ $boardItem.Add_Click({
 })
 [void]$menu.Items.Add($boardItem)
 
+$wanderItem = New-Object System.Windows.Controls.MenuItem
+$wanderItem.Header = '自动溜达'
+$wanderItem.IsCheckable = $true
+$wanderItem.IsChecked = $script:WanderEnabled
+$wanderItem.Add_Click({
+    $script:WanderEnabled = $wanderItem.IsChecked
+    if ($script:WanderEnabled) { Wander-ScheduleNext } else { Wander-Stop; Clear-LocalEmotion }
+})
+[void]$menu.Items.Add($wanderItem)
+
 $recenterItem = New-Object System.Windows.Controls.MenuItem
 $recenterItem.Header = '重新居中'
 $recenterItem.Add_Click({ Restore-Position -IgnoreSaved; Save-Position })
@@ -625,6 +823,8 @@ $script:Poll.Add_Tick({ Apply-State (Fetch-State) })
 $script:Window.Add_Closed({
     $script:Timer.Stop()
     $script:Poll.Stop()
+    $script:WanderTimer.Stop()
+    $script:WanderDwellTimer.Stop()
     $script:HideTimer.Stop()
     $script:SquashTimer.Stop()
     try { $script:Player.Close() } catch { }
@@ -636,6 +836,7 @@ Restore-Position
 Apply-Size $script:Scale
 Set-PetState 'walking'
 $script:Poll.Start()
+Wander-ScheduleNext
 Write-PetLog ('window started at scale {0}, state url = {1}' -f $script:Scale, $script:StateUrl)
 
 try {

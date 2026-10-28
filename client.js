@@ -576,7 +576,20 @@ window.__ModuleLoader__.load({
             h('button', { style: styles.buttonPrimary, disabled: busy, onClick: saveLive }, '保存礼物动作'))),
 
         h(Card, { title: '宠物行为', hint: '这些只影响插件，不改直播服务。保存后立即生效。' },
-          h(Row, { label: '人设' },
+          h(Row, { label: '自动溜达' },
+            h(Check, {
+              label: '让它在桌面上自己走动（走一会儿停一会儿）',
+              value: petValue('wander') !== false,
+              onChange: (v) => setPetValue('wander', v),
+            })),
+          h(Row, { label: '走多快' },
+            h(Number, { value: petValue('wanderSpeed'), onChange: (v) => setPetValue('wanderSpeed', v === '' ? 55 : v) }),
+            h('span', { style: styles.hint }, '像素/秒，35 慢悠悠，80 有点赶')),
+          h(Row, { label: '歇多久' },
+            h(Number, { value: petValue('wanderDwellMinSec'), onChange: (v) => setPetValue('wanderDwellMinSec', v === '' ? 6 : v) }),
+            h('span', { style: styles.hint }, '到'), 
+            h(Number, { value: petValue('wanderDwellMaxSec'), onChange: (v) => setPetValue('wanderDwellMaxSec', v === '' ? 18 : v) }),
+            h('span', { style: styles.hint }, '秒之间随机停一会儿；你点它、拖它、打字时会自动暂停')),          h(Row, { label: '人设' },
             h(TextArea, {
               value: petValue('persona'),
               placeholder: '留空就用内置默认人设（大肥鲸）。想改性格/说话方式就在这里写，例如：\n你是直播间里一只爱吐槽的海獭，说话短、爱用「哎」开头，不懂就说不知道。',

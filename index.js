@@ -33,6 +33,10 @@ const EMOTIONS = ['happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cookin
 
 /** Plugin keys the settings page may write. */
 const PET_CONFIG_KEYS = [
+  'wander',
+  'wanderSpeed',
+  'wanderDwellMinSec',
+  'wanderDwellMaxSec',
   'persona',
   'mode', 'profile', 'manageProfile', 'appUrl', 'pollMs', 'replyKinds',
   'manageLive', 'autoStartLive', 'livePort', 'liveHost', 'liveMode', 'liveBaseDir', 'liveStartTimeoutSec',
@@ -52,6 +56,13 @@ const LIVE_CONFIG_KEYS = ['douyin', 'songs', 'gift_actions', 'voice', 'rate', 'p
 let liveVoice = null
 
 const DEFAULTS = {
+  /** 自动溜达：自己在桌面上走动、停一会儿、再走 */
+  wander: true,
+  /** 走路速度（像素/秒） */
+  wanderSpeed: 55,
+  /** 到地方后歇多久（秒，区间随机） */
+  wanderDwellMinSec: 6,
+  wanderDwellMaxSec: 18,
   /** 宠物人设（系统提示词）。留空 = 用内置默认人设 */
   persona: '',
   /**
@@ -1777,6 +1788,13 @@ export function apply(ctx) {
           ...state,
           speaking: state.audioPath !== '' && Date.now() - state.at < Math.max(2000, state.audioDuration * 1000 + 1500),
           config: { speak: config.speak, petSilent: config.petSilent, profile: config.profile, appUrl: appBase(), manageLive: config.manageLive === true, livePort: config.livePort },
+    // 宠物窗口每轮都读这段：改了设置立刻生效，不用重开窗口
+    wander: {
+      enabled: config.wander !== false,
+      speed: Math.max(10, Math.min(400, Number(config.wanderSpeed) || 55)),
+      dwellMinSec: Math.max(1, Math.min(120, Number(config.wanderDwellMinSec) || 6)),
+      dwellMaxSec: Math.max(1, Math.min(300, Number(config.wanderDwellMaxSec) || 18)),
+    },
         })
         return
       }
