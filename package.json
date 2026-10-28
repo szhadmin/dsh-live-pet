@@ -1,37 +1,53 @@
 {
-  "name": "dsh-live-pet",
-  "version": "1.2.0",
-  "private": true,
-  "description": "抖音直播弹幕 → DSH 会话 → 桌面宠物：小鲸鱼在桌面上冒出弹幕回复、换情绪动图并用 Edge-TTS 说话，可在 DSH 设置里配置。",
-  "type": "module",
-  "exports": {
-    ".": "./index.js",
-    "./client": "./client.js",
-    "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
-  },
-  "files": [
-    "index.js",
-    "client.js",
-    "pet.ps1",
-    "cordis.patch.yml",
-    "profile",
-    "frames",
-    "locale/*.json",
-    "icon.svg",
-    "README.md"
-  ],
-  "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": {
-      "platform": "web",
-      "immediately": false,
-      "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-ui-settings"
-      ]
-    }
-  }
+    "name":  "dsh-live-pet",
+    "version":  "1.2.0",
+    "private":  true,
+    "description":  "抖音直播弹幕 → DSH 会话 → 桌面宠物：小鲸鱼在桌面上冒出弹幕回复、换情绪动图并用 Edge-TTS 说话，可在 DSH 设置里配置。",
+    "type":  "module",
+    "exports":  {
+                    ".":  "./index.js",
+                    "./client":  "./client.js",
+                    "./locale/*.json":  "./locale/*.json",
+                    "./icon":  "./icon.svg"
+                },
+    "files":  [
+                  "index.js",
+                  "client.js",
+                  "pet.ps1",
+                  "cordis.patch.yml",
+                  "profile",
+                  "frames",
+                  "locale/*.json",
+                  "icon.svg",
+                  "README.md"
+              ],
+    "dsh":  {
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           },
+                "client":  {
+                               "platform":  "web",
+                               "immediately":  false,
+                               "inject":  [
+                                              "@deepseek-ai/dsh-client-runtime",
+                                              "@deepseek-ai/dsh-client-locale",
+                                              "@deepseek-ai/dsh-client-ui-slots",
+                                              "@deepseek-ai/dsh-client-ui-settings"
+                                          ]
+                           }
+            },
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/szhadmin/dsh-live-pet.git"
+                   },
+    "keywords":  [
+                     "dsh",
+                     "dsh-plugin",
+                     "desktop-pet",
+                     "douyin",
+                     "live",
+                     "tts",
+                     "edge-tts"
+                 ],
+    "license":  "MIT"
 }
