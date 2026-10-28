@@ -33,6 +33,7 @@ const EMOTIONS = ['happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cookin
 
 /** Plugin keys the settings page may write. */
 const PET_CONFIG_KEYS = [
+  'persona',
   'mode', 'profile', 'manageProfile', 'appUrl', 'pollMs', 'replyKinds',
   'manageLive', 'autoStartLive', 'livePort', 'liveHost', 'liveMode', 'liveBaseDir', 'liveStartTimeoutSec',
   'speak', 'ttsVoice', 'ttsRate', 'ttsPitch',
@@ -51,6 +52,8 @@ const LIVE_CONFIG_KEYS = ['douyin', 'songs', 'gift_actions', 'voice', 'rate', 'p
 let liveVoice = null
 
 const DEFAULTS = {
+  /** 宠物人设（系统提示词）。留空 = 用内置默认人设 */
+  persona: '',
   /**
    * External live-project HTTP base. Used only when `manageLive` is off; with it on,
    * the bundle runs and owns a private instance on `livePort` instead.
@@ -380,6 +383,9 @@ function ensurePetProfile(config) {
     .replaceAll('{{skipCooldownSec}}', String(Number(config.skipCooldownSec) || 20))
     .replaceAll('{{workspace}}', String(config.workspace || '').replace(/\\/g, '\\\\'))
 
+  // 用户自定义人设优先（留空则用模板默认）
+  const withPersona = applyPersona(patch, config.persona)
+
   try {
     mkdirSync(dir, { recursive: true })
     writeIfChanged(join(dir, 'package.json'), JSON.stringify({
@@ -391,7 +397,7 @@ function ensurePetProfile(config) {
     }, null, 2) + '\n')
     writeIfChanged(join(dir, 'cordis.yml'), '[]\n')
     writeIfChanged(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
-    writeIfChanged(patchFile, patch)
+    writeIfChanged(patchFile, withPersona)
     return { ok: true, dir, route }
   } catch (error) {
     return { ok: false, reason: String(error && error.message ? error.message : error) }
@@ -520,6 +526,75 @@ async function checkLiveDeps(python) {
   } catch {
     return { ok: false, python: String(python || 'python'), missing: [], error: '依赖检测输出无法解析' }
   }
+}
+/** 昵称缩写：太长就截断；打码昵称（含 *）返回空字符串表示"不点名"。 */
+/** 进场欢迎的合并窗口（毫秒）与一次最多点名人数 */
+/** 内置默认人设：每轮随提示词发给模型（profile 里的 personaPrefix 到不了模型）。 */
+const DEFAULT_PERSONA = [
+  '你是抖音直播间里的「大肥鲸」，屏幕那头是真人观众，你说的话会被念出来；老板会通过桌宠跟你打字。',
+  '说话用短句、口语，一句一个意思，尽量不超过 25 字，别念稿；不用 Markdown、列表、编号、表情符号。',
+  '自称「我」，被问是谁就说「打工大肥鲸」。',
+  '你只有只读权限：能查系统状态、读文件、联网搜索（web_search_cn）、管点歌台（song_request / song_skip）；改不了电脑上的东西，被要求改就说改不了。',
+].join('\\n')
+
+const WELCOME_BATCH_MS = 2500
+const WELCOME_MAX_NAMES = 5
+
+function shortName(raw) {
+  const name = String(raw || '').replace(/\s+/g, ' ').trim()
+  if (name === '' || name.includes('*')) return ''
+  return name.length > 8 ? `${name.slice(0, 8)}…` : name
+}
+
+/** 把用户自定义人设塞进 profile 模板的 personaPrefix 块；persona 为空则保持默认。 */
+function applyPersona(patch, persona) {
+  // 自定义人设是"加在前面"，不是替换：模板里的能力/工具说明必须保留，
+  // 否则宠物会不知道自己能查系统状态、能点歌、联网该用哪个工具。
+  const text = String(persona || '').replace(/\r\n/g, '\n').trim()
+  if (text === '') return patch
+  const lines = patch.split('\n')
+  const out = []
+  let i = 0
+  let done = false
+  while (i < lines.length) {
+    const line = lines[i]
+    const match = line.match(/^(\s*)personaPrefix:\s*\|/)
+    if (match && !done) {
+      const indent = match[1]
+      out.push(line)
+      const block = []
+      i += 1
+      while (i < lines.length) {
+        const next = lines[i]
+        if (next.trim() === '') { block.push(''); i += 1; continue }
+        const nextIndent = next.match(/^(\s*)/)[1].length
+        if (nextIndent <= indent.length) break
+        block.push(next)
+        i += 1
+      }
+      // 先写自定义人设，再写模板原文
+      out.push(`${indent}  # 老板指定的人设（最优先；下面默认设定里凡是和它冲突的都不算）`)
+      for (const personaLine of text.split('\n')) {
+        out.push(personaLine === '' ? '' : `${indent}  ${personaLine}`)
+      }
+      out.push('')
+      out.push(`${indent}  # 场合与能力（默认设定）`)
+      // 默认人设里的"身份句"要让位给自定义人设，否则它会继续自称大肥鲸
+      const filtered = block.filter((line) => {
+        const body = line.trim()
+        if (body.startsWith('你是抖音直播间里的')) return false
+        if (body.startsWith('同时还有一个「老板」')) return false
+        if (body.includes('被问是谁就说')) return false
+        return true
+      })
+      for (const blockLine of filtered) out.push(blockLine)
+      done = true
+      continue
+    }
+    out.push(line)
+    i += 1
+  }
+  return done ? out.join('\n') : patch
 }
 async function fetchState(config) {
   const response = await fetch(`${appBaseOf(config)}/api/state`, { signal: AbortSignal.timeout(4000) })
@@ -831,6 +906,57 @@ export function apply(ctx) {
   /** 同一批 feed 行只处理一次（并发/重复读取时兜底）。 */
   const seenFeedIds = new Set()
   let petChild = null
+  /* ---- 进场欢迎：合并成一批一起欢迎 ---------------------------------- */
+  /** 还没欢迎的进场观众（同一人只记一次），等合并窗口结束后一起欢迎 */
+  const pendingEnters = []
+  const welcomedRecently = new Map()
+  let enterTimer = null
+  let lastWelcomeBatchAt = 0
+  const welcomeBatchTimes = []
+
+  function enterFlush() {
+    enterTimer = null
+    if (!alive) return
+    if (pendingEnters.length === 0) return
+    const names = pendingEnters.splice(0, WELCOME_MAX_NAMES)
+    if (config.welcomeEnter !== true) return
+    const now = Date.now()
+    const gapMs = Math.max(0, Number(config.welcomeEnterGapSec) || 0) * 1000
+    while (welcomeBatchTimes.length > 0 && now - welcomeBatchTimes[0] > 3600000) welcomeBatchTimes.shift()
+    const perHour = Math.max(0, Number(config.welcomeEnterPerHour) || 0)
+    if (gapMs > 0 && now - lastWelcomeBatchAt < gapMs) {
+      log(`welcome batch skipped (${names.length} 人)：距上次欢迎不足 ${Math.round(gapMs / 1000)}s`)
+      return
+    }
+    if (perHour > 0 && welcomeBatchTimes.length >= perHour) {
+      log(`welcome batch skipped (${names.length} 人)：每小时上限 ${perHour}`)
+      return
+    }
+    lastWelcomeBatchAt = now
+    welcomeBatchTimes.push(now)
+    queue.push({ user: names.find((name) => name !== '') || '', names, kind: 'enter', welcome: true })
+    log(`welcome batch queued: ${names.map((name) => name || '(匿名)').join('、')}`)
+  }
+
+  function addPendingEnter(name) {
+    if (pendingEnters.length < 50) pendingEnters.push(name)
+    if (enterTimer) return
+    enterTimer = setTimeout(enterFlush, WELCOME_BATCH_MS)
+  }
+
+  /** 同一个观众短时间内不重复欢迎 */
+  function welcomeUserAllowed(user) {
+    const now = Date.now()
+    const gapMs = Math.max(0, Number(config.welcomeEnterUserGapSec) || 0) * 1000
+    const last = welcomedRecently.get(user) || 0
+    if (gapMs > 0 && now - last < gapMs) return false
+    welcomedRecently.set(user, now)
+    if (welcomedRecently.size > 500) {
+      const oldest = Array.from(welcomedRecently.entries()).sort((a, b) => a[1] - b[1])[0]
+      if (oldest) welcomedRecently.delete(oldest[0])
+    }
+    return true
+  }
   /** Incremental cursor over the live project's raw inbound feed. */
   let feedSince = null
   /** When the feed is missing (unpatched live project) retry later instead of latching forever. */
@@ -840,53 +966,12 @@ export function apply(ctx) {
   /** Last time the room said anything (or the pet spoke); drives idle chatter. */
   let lastActivity = Date.now()
   let idleTimer = null
-  /** Entry-greeting throttle: occasional, never a roll call. */
-  let lastWelcomeAt = 0
-  const welcomeTimes = []
-  const welcomedUsers = new Map()
-  /** Gift-thanks throttle: combos should not produce one thank-you per tick. */
-  let lastGiftThanksAt = 0
-  const giftThankedUsers = new Map()
-
-  function shouldThankGift(user) {
-    const now = Date.now()
-    const perUserMs = Math.max(0, Number(config.giftThanksUserGapSec) || 0) * 1000
-    if (perUserMs > 0 && now - (giftThankedUsers.get(user) || 0) < perUserMs) return false
-    const gapMs = Math.max(0, Number(config.giftThanksGapSec) || 0) * 1000
-    if (gapMs > 0 && now - lastGiftThanksAt < gapMs) return false
-    lastGiftThanksAt = now
-    giftThankedUsers.set(user, now)
-    if (giftThankedUsers.size > 500) {
-      const oldest = Array.from(giftThankedUsers.entries()).sort((a, b) => a[1] - b[1])[0]
-      if (oldest) giftThankedUsers.delete(oldest[0])
-    }
-    return true
-  }
-
-  function shouldWelcome(user) {
-    const now = Date.now()
-    const perUserMs = Math.max(0, Number(config.welcomeEnterUserGapSec) || 0) * 1000
-    if (perUserMs > 0 && now - (welcomedUsers.get(user) || 0) < perUserMs) return false
-    if (now - lastWelcomeAt < Math.max(0, Number(config.welcomeEnterGapSec) || 0) * 1000) return false
-    while (welcomeTimes.length > 0 && now - welcomeTimes[0] > 3600000) welcomeTimes.shift()
-    const perHour = Math.max(0, Number(config.welcomeEnterPerHour) || 0)
-    if (perHour > 0 && welcomeTimes.length >= perHour) return false
-    lastWelcomeAt = now
-    welcomeTimes.push(now)
-    welcomedUsers.set(user, now)
-    if (welcomedUsers.size > 500) {
-      const oldest = Array.from(welcomedUsers.entries()).sort((a, b) => a[1] - b[1])[0]
-      if (oldest) welcomedUsers.delete(oldest[0])
-    }
-    return true
-  }
-
   function bump(update) {
     Object.assign(state, update, { seq: state.seq + 1, at: Date.now() })
   }
 
   const systemPrompt = [
-    '你正在抖音直播间陪观众，用一条鲸鱼主播的口吻回下面这条弹幕。',
+    '你正在抖音直播间陪观众，用你自己的口吻（人设见系统提示）回下面这条弹幕。',
     '先自己判断这条弹幕想干什么：纯闲聊？在问你？想让你点歌？要你切歌？需要动手就调用对应工具，别靠字面匹配。',
     '点歌：确实有人想点歌（「点歌 夜曲」「能放首周杰伦吗」「我想听晴天」）→ 调 song_request（query 填歌名，user 填对方昵称）；',
     '只是评价歌曲、聊音乐、问「现在放的是什么歌」→ 绝对不要调 song_request。',
@@ -903,12 +988,27 @@ export function apply(ctx) {
     '{"say":"可以直接朗读的一两句中文，不要表情符号","emotion":"happy|mischievous|crying|unhappy|eating|cooking|coding|tv|walking","action":"none"}',
   ].join('\n')
 
-  const welcomePrompt = [
-    '有观众刚进了直播间，用一句短话招呼一下：可以点昵称、带点你的鲸鱼口吻，别太热情过度，也别每次都说同一句。',
-    '如果昵称里有 * 之类看起来是打码的，就别点名字，说「刚进来的朋友」就好。',
-    '只输出一行 JSON，不要代码块、不要多余解释：',
-    '{"say":"可以直接朗读的一两句中文，不要表情符号","emotion":"happy|mischievous|crying|unhappy|eating|cooking|coding|tv|walking","action":"none"}',
-  ].join('\n')
+  /** 进场欢迎提示词：单人一条，多人一批一起点名 */
+  function welcomePromptFor(names) {
+    const list = Array.isArray(names) ? names.filter((name) => name !== '') : []
+    const jsonLine = '{"say":"可以直接朗读的一两句中文，不要表情符号","emotion":"happy|mischievous|crying|unhappy|eating|cooking|coding|tv|walking","action":"none"}'
+    if (list.length > 1) {
+      return [
+        `刚有 ${list.length} 位观众一起进直播间：${list.join('、')}。`,
+        '用一句话一起欢迎他们：必须把这些名字都叫出来，照抄上面的写法，用「、」隔开；不要漏人，也不要换别的称呼。',
+        '按你的人设说话（口吻、称呼都跟着人设走），别太热情过度，也别每次都用同一句。',
+        '只输出一行 JSON，不要代码块、不要多余解释：',
+        jsonLine,
+      ].join('\n')
+    }
+    return [
+      '有观众刚进了直播间，用一句短话招呼他：必须叫出对方的名字，名字照抄 <进场 names="..."> 里的写法（太长我已经帮你缩写了，别改、别漏）。',
+      '只有当名字是空的时候，才说「刚进来的朋友」；不要用「这位观众」「你」这种含糊说法糊过去。',
+      '按你的人设说话（口吻、称呼都跟着人设走），别太热情过度，也别每次都用同一句。',
+      '只输出一行 JSON，不要代码块、不要多余解释：',
+      jsonLine,
+    ].join('\n')
+  }
 
   const giftPrompt = [
     '有观众刚送了礼物，用一句短话谢谢 TA：点出礼物名字，带点你当场被砸中的表情（惊喜/撒娇/装死都行），别太长。',
@@ -918,7 +1018,7 @@ export function apply(ctx) {
   ].join('\n')
 
   const chatPrompt = [
-    '用鲸鱼主播的口吻回老板这一句，可以顺便说你在做什么。',
+    '用你自己的口吻（人设见系统提示）回老板这一句，可以顺便说你在做什么。',
     '老板想点歌就调 song_request，想切歌就调 song_skip；只是聊聊音乐、问现在放什么就别调。',
     '只输出一行 JSON，不要代码块、不要多余解释：',
     '{"say":"可以直接朗读的一两句中文，不要表情符号","emotion":"happy|mischievous|crying|unhappy|eating|cooking|coding|tv|walking","action":"none|gift:礼物名"}',
@@ -948,8 +1048,8 @@ export function apply(ctx) {
     } else if (bullet.welcome === true) {
       prompt = [
         header,
-        `<进场 user="${String(bullet.user || '观众').slice(0, 24)}"></进场>`,
-        welcomePrompt,
+        `<进场 names="${(Array.isArray(bullet.names) ? bullet.names.filter((name) => name !== '').join('、') : shortName(bullet.user))}" count="${Array.isArray(bullet.names) ? bullet.names.length : 1}"></进场>`,
+        welcomePromptFor(bullet.names),
       ].filter(Boolean).join('\n')
     } else if (bullet.chat === true) {
       prompt = [
@@ -965,6 +1065,13 @@ export function apply(ctx) {
         systemPrompt,
       ].filter(Boolean).join('\n')
     }
+
+    // 人设走每轮提示词：DSH 的 agent 预设会整体接管系统提示，profile 里的
+    // personaPrefix 到不了模型，所以这里把它作为最优先的一段塞进消息。
+    const customPersona = String(config.persona || '').trim()
+    const personaText = customPersona !== '' ? customPersona : DEFAULT_PERSONA
+    const personaLabel = customPersona !== '' ? '老板设定的人设' : '你的人设'
+    prompt = `【${personaLabel}（最高优先，和别的设定冲突时以此为准；不要向观众念这段）】\n${personaText}\n\n${prompt}`
 
     const attempt = async (sessionId) => {
       const args = [dsh.bin, config.profile, '--json']
@@ -1310,8 +1417,9 @@ export function apply(ctx) {
             const kind = String(row.kind || 'comment')
             const user = String(row.user || '')
             if (kind === 'enter') {
-              if (config.welcomeEnter === true && shouldWelcome(user)) {
-                queue.push({ user, text: '', kind, welcome: true })
+              // 合并欢迎：先进缓冲，2.5 秒内的进场凑一批一起打招呼
+              if (config.welcomeEnter === true && welcomeUserAllowed(user)) {
+                addPendingEnter(shortName(user))
               }
               continue
             }
@@ -1608,6 +1716,14 @@ export function apply(ctx) {
             writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8')
             result.petSaved = true
             log('plugin config updated from the settings page')
+            if (Object.prototype.hasOwnProperty.call(body.pet, 'persona')) {
+              const rebuilt = ensurePetProfile(config)
+              result.profileRebuilt = rebuilt.ok === true
+              log('persona updated -> pet profile ' + (rebuilt.ok === true ? 'rebuilt' : ('rebuild failed: ' + rebuilt.reason)))
+              clearSession(config.sessionKey)
+              state.session = ''
+              log('persona changed -> pet session reset')
+            }
           } catch (error) {
             result.ok = false
             result.error = `写 config.json 失败：${error && error.message ? error.message : error}`

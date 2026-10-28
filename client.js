@@ -139,6 +139,15 @@ window.__ModuleLoader__.load({
       })
     }
 
+    function TextArea(props) {
+      return h('textarea', {
+        style: { ...styles.input, flex: '1 1 100%', minHeight: '120px', lineHeight: '1.6', padding: '8px 10px', resize: 'vertical' },
+        value: props.value === undefined || props.value === null ? '' : props.value,
+        placeholder: props.placeholder || '',
+        rows: props.rows || 6,
+        onChange: (event) => props.onChange(event.target.value),
+      })
+    }
     function Number(props) {
       return h('input', {
         style: { ...styles.input, flex: '0 0 110px', minWidth: '90px' },
@@ -567,6 +576,13 @@ window.__ModuleLoader__.load({
             h('button', { style: styles.buttonPrimary, disabled: busy, onClick: saveLive }, '保存礼物动作'))),
 
         h(Card, { title: '宠物行为', hint: '这些只影响插件，不改直播服务。保存后立即生效。' },
+          h(Row, { label: '人设' },
+            h(TextArea, {
+              value: petValue('persona'),
+              placeholder: '留空就用内置默认人设（大肥鲸）。想改性格/说话方式就在这里写，例如：\n你是直播间里一只爱吐槽的海獭，说话短、爱用「哎」开头，不懂就说不知道。',
+              onChange: (v) => setPetValue('persona', v),
+            }),
+            h('span', { style: styles.hint }, '保存后会重建宠物 profile，下一轮对话生效（当前这轮不受影响）')),
           h(Row, { label: '对话模式' },
             h(Select, {
               value: petValue('mode'),
