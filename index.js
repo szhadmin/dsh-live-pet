@@ -444,7 +444,7 @@ async function synthesize(config, text) {
   const result = await runProcess(
     config.pythonBin,
     ['-c', TTS_SNIPPET, text, voice, rate, pitch],
-    { cwd: config.workspace, timeoutMs: 25000 },
+    { cwd: config.workspace, timeoutMs: 25000, env: { FATWHALE_BASE_DIR: (String(config.liveBaseDir || '').trim() || join(PKG_DIR, 'live-data')), PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } },
   )
   if (result.code !== 0) {
     log(`tts failed: ${(result.stderr || '').trim().split('\n').slice(-1)[0] || 'exit ' + result.code}`)
@@ -1704,7 +1704,7 @@ export function apply(ctx) {
           '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', PET_SCRIPT,
         ], {
           cwd: PKG_DIR,
-          env: { ...process.env, PET_STATE_URL: stateUrl, PET_FRAMES: FRAMES_DIR, PET_SILENT: config.petSilent ? '1' : '0' },
+          env: { ...process.env, PET_STATE_URL: stateUrl, PET_FRAMES: FRAMES_DIR, PET_SILENT: config.petSilent ? '1' : '0', PET_LIVE_BASE: appBase() },
           stdio: 'ignore',
           windowsHide: true,
           detached: false,

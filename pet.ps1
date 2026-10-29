@@ -520,10 +520,191 @@ function Show-Bubble([string]$Text, [int]$HoldMs) {
     $script:HideTimer.Start()
 }
 
+# ---------------------------------------------------------------- audio
+# Voice volume: WPF MediaPlayer defaults to 0.5 -> set it explicitly.
+# Music: MediaPlayer.Open() on http(s) throws here, so each song is downloaded
+# to %TEMP%\dsh-live-pet-music first; when it ends we POST /api/song/finished so
+# the live service advances its queue (same contract the stage page uses).
+$script:VoiceVolume = 1.0
+try {
+    $vv = [string]$env:PET_VOICE_VOLUME
+    if (-not [string]::IsNullOrWhiteSpace($vv)) {
+        $parsed = 0.0
+        if ([double]::TryParse($vv, [ref]$parsed)) {
+            if ($parsed -lt 0) { $parsed = 0.0 }
+            if ($parsed -gt 1) { $parsed = 1.0 }
+            $script:VoiceVolume = $parsed
+        }
+    }
+} catch { }
+Write-PetLog ('voice volume = ' + $script:VoiceVolume)
+
+$script:MusicPlayer = $null
+$script:MusicKey = ''
+$script:MusicId = 0
+$script:MusicVolume = -1.0
+$script:MusicClient = $null
+$script:MusicTask = $null
+$script:MusicTaskKey = ''
+$script:MusicTaskPath = ''
+$script:MusicFailedKey = ''
+$script:MusicEnded = $false
+$script:MusicBroken = $false
+
+function Get-LiveBase {
+    $base = [string]$env:PET_LIVE_BASE
+    if ([string]::IsNullOrWhiteSpace($base)) { $base = 'http://127.0.0.1:8791' }
+    return $base.TrimEnd('/')
+}
+
+function Get-MusicCachePath([string]$Url) {
+    $sha = [System.Security.Cryptography.SHA1]::Create()
+    $hash = [System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Url)))
+    $sha.Dispose()
+    $dir = Join-Path $env:TEMP 'dsh-live-pet-music'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    return (Join-Path $dir ($hash.Replace('-', '').ToLower() + '.mp3'))
+}
+
+function Send-SongEvent([string]$Path, [int]$Id) {
+    try {
+        $body = '{"id":' + $Id + '}'
+        Invoke-RestMethod -Uri ((Get-LiveBase) + $Path) -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 8 | Out-Null
+        return $true
+    } catch {
+        Write-PetLog ('song event failed (' + $Path + '): ' + $_.Exception.Message)
+        return $false
+    }
+}
+
+function Play-MusicFile([string]$Path, [string]$Title, [double]$Vol, [int]$Id) {
+    $old = $script:MusicPlayer
+    $player = New-Object System.Windows.Media.MediaPlayer
+    $script:MusicPlayer = $player
+    $script:MusicEnded = $false
+    $script:MusicBroken = $false
+    $script:MusicId = $Id
+    try {
+        $player.add_MediaEnded({ $script:MusicEnded = $true })
+        $player.add_MediaFailed({ $script:MusicBroken = $true })
+    } catch { }
+    if ($null -ne $old) { try { $old.Stop(); $old.Close() } catch { } }
+    try {
+        $player.Open((New-Object System.Uri($Path)))
+        $player.Volume = $Vol
+        $player.Play()
+        $script:MusicVolume = $Vol
+        Write-PetLog ('music -> ' + $Title + ' (id ' + $Id + ', vol ' + $Vol + ')')
+        return $true
+    } catch {
+        Write-PetLog ('music play failed: ' + $_.Exception.Message)
+        return $false
+    }
+}
+
+function Stop-Music {
+    if ($null -ne $script:MusicPlayer) {
+        try { $script:MusicPlayer.Stop(); $script:MusicPlayer.Close() } catch { }
+        $script:MusicVolume = -1.0
+    }
+    if ($script:MusicKey -ne '') { Write-PetLog 'music stopped' }
+    $script:MusicKey = ''
+    $script:MusicEnded = $false
+    $script:MusicBroken = $false
+}
+
+function Sync-Music($state) {
+    if ($null -eq $state) { return }
+    $m = $null
+    if (($state.PSObject.Properties.Name -contains 'live') -and ($null -ne $state.live) -and
+        ($state.live.PSObject.Properties.Name -contains 'music')) {
+        $m = $state.live.music
+    }
+    if ($null -eq $m) { return }
+
+    if ($script:MusicEnded -or $script:MusicBroken) {
+        $why = 'ended'
+        if ($script:MusicBroken) { $why = 'failed' }
+        $id = [int]$script:MusicId
+        $script:MusicEnded = $false
+        $script:MusicBroken = $false
+        $script:MusicKey = ''
+        $script:MusicVolume = -1.0
+        Write-PetLog ('music ' + $why + ' -> asking live service for the next song')
+        Send-SongEvent '/api/song/finished' $id | Out-Null
+        return
+    }
+
+    $url = [string]$m.url
+    $title = [string]$m.title
+    $id = [int]$m.id
+    $playing = ($m.playing -eq $true) -and (-not [string]::IsNullOrWhiteSpace($url))
+    if ($script:Silent -or (-not $playing)) { Stop-Music; return }
+
+    $vol = 0.55
+    if ($null -ne $m.volume) { $vol = [double]$m.volume }
+    if ($vol -lt 0) { $vol = 0.0 }
+    if ($vol -gt 1) { $vol = 1.0 }
+
+    $key = ([string]$m.id) + '|' + $url
+    $local = ''
+    if ($url -match '^[a-zA-Z][a-zA-Z0-9+.\-]*:file:') { $local = ([System.Uri]$url).LocalPath }
+    elseif ($url -match '^[a-zA-Z][a-zA-Z0-9+.\-]*:') { $local = Get-MusicCachePath $url }
+    else {
+        $full = (Get-LiveBase) + '/' + $url.TrimStart('/')
+        $local = Get-MusicCachePath $full
+        $url = $full
+        $key = ([string]$m.id) + '|' + $full
+    }
+
+    if ($key -eq $script:MusicKey) {
+        if ($null -ne $script:MusicPlayer -and [Math]::Abs($vol - $script:MusicVolume) -gt 0.001) {
+            try { $script:MusicPlayer.Volume = $vol; $script:MusicVolume = $vol } catch { }
+        }
+        return
+    }
+    if ($key -eq $script:MusicFailedKey) { return }
+
+    if ($local -ne '' -and (Test-Path $local) -and ((Get-Item $local).Length -gt 65536)) {
+        if (Play-MusicFile $local $title $vol $id) { $script:MusicKey = $key } else { $script:MusicFailedKey = $key }
+        return
+    }
+
+    if ($script:MusicTaskKey -eq $key -and $null -ne $script:MusicTask) {
+        $task = $script:MusicTask
+        if (-not $task.IsCompleted) { return }
+        $script:MusicTask = $null
+        if ($task.IsFaulted -or $task.IsCanceled) {
+            Write-PetLog ('music download failed: ' + $title)
+            $script:MusicFailedKey = $key
+            Send-SongEvent '/api/song/retry' $id | Out-Null
+            return
+        }
+        if (Test-Path $script:MusicTaskPath) {
+            if (Play-MusicFile $script:MusicTaskPath $title $vol $id) { $script:MusicKey = $key }
+            else { $script:MusicFailedKey = $key; Send-SongEvent '/api/song/retry' $id | Out-Null }
+        }
+        return
+    }
+
+    if ($url -notmatch '^https?:') { return }
+    try {
+        if ($null -eq $script:MusicClient) { $script:MusicClient = New-Object System.Net.WebClient }
+        if (Test-Path $local) { Remove-Item $local -Force -ErrorAction SilentlyContinue }
+        $script:MusicTaskKey = $key
+        $script:MusicTaskPath = $local
+        $script:MusicTask = $script:MusicClient.DownloadFileTaskAsync((New-Object System.Uri($url)), $local)
+        Write-PetLog ('music download started: ' + $title + ' (id ' + $id + ')')
+    } catch {
+        Write-PetLog ('music download start failed: ' + $_.Exception.Message)
+        $script:MusicFailedKey = $key
+    }
+}
 function Play-Audio([string]$Path) {
     if ($script:Silent -or [string]::IsNullOrWhiteSpace($Path)) { return }
     if (-not (Test-Path $Path)) { return }
     try {
+        $script:Player.Volume = $script:VoiceVolume
         $script:Player.Open((New-Object System.Uri($Path)))
         $script:Player.Play()
     } catch {
@@ -1018,7 +1199,8 @@ function Update-ScenePanels($state) {
 }
 
 function Apply-State($state) {
-    Update-Board $state
+    Update-Board 
+    Sync-Music $state
     if ($null -eq $state) {
         Set-PetState 'crying'
         return
