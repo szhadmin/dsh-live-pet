@@ -628,6 +628,12 @@ function Set-SceneMode([bool]$On, [string]$ImagePath) {
         $script:Window.Left = $wa.Left
         $script:Window.Top = $wa.Top
         Move-WindowRect ([int]$wa.Left) ([int]$wa.Top) ([int]$wa.Width) ([int]$wa.Height)
+        if ($script:Scale -lt 1.2) {
+            # 整屏背景上按 0.6 倍显示太少了，场景里至少给到 1.35
+            $script:ScaleBeforeScene = $script:Scale
+            $script:Scale = 1.35
+            Apply-Size $script:Scale
+        }
         $script:SceneBg.Visibility = 'Visible'
         $script:PoolPanel.Visibility = 'Visible'
         $script:SongPanel.Visibility = 'Visible'
@@ -642,6 +648,11 @@ function Set-SceneMode([bool]$On, [string]$ImagePath) {
     }
     $script:Window.Width = $script:PetWidth + $script:BoardExtra
     $script:Window.Height = $script:PetBodyHeight
+    if ($null -ne $script:ScaleBeforeScene) {
+        $script:Scale = $script:ScaleBeforeScene
+        $script:ScaleBeforeScene = $null
+        Apply-Size $script:Scale
+    }
     $script:SceneBg.Visibility = 'Collapsed'
     $script:PoolPanel.Visibility = 'Collapsed'
     $script:SongPanel.Visibility = 'Collapsed'
@@ -918,6 +929,10 @@ function Get-PetBounds {
 
 function Wander-PickTarget {
     $bounds = Get-PetBounds
+    if (($bounds.MaxLeft - $bounds.MinLeft) -lt 4 -or ($bounds.MaxTop - $bounds.MinTop) -lt 4) {
+        # 窗口还没铺满（刚进场景的那一两秒）：这次先不走，等下一轮
+        return $null
+    }
     # 当前宠物本体的位置（窗口 left 里带了板子的偏移）
     $extra = $script:BoardExtra
     if (-not $extra) { $extra = 0 }
@@ -939,6 +954,8 @@ function Wander-BeginMove {
     if (Wander-IsPaused) { return }
     # 刚有情绪反应（哭/笑）就先站着，别马上走开
     if ((Get-Date) -lt $script:EmotionHoldUntil) { Wander-ScheduleNext; return }
+    $target = Wander-PickTarget
+    if ($null -eq $target) { Wander-ScheduleNext; return }
     $script:WanderTargetX = $target.X
     $script:WanderTargetY = $target.Y
     $extra = $script:BoardExtra

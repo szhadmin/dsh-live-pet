@@ -196,6 +196,7 @@ window.__ModuleLoader__.load({
       const [liveState, setLiveState] = React.useState(null)
       const [liveBusy, setLiveBusy] = React.useState(false)
       const [deps, setDeps] = React.useState(null)
+      const [backgrounds, setBackgrounds] = React.useState([])
       const [depsBusy, setDepsBusy] = React.useState(false)
 
       async function load() {
@@ -368,7 +369,16 @@ window.__ModuleLoader__.load({
         setDepsBusy(false)
       }
 
-      React.useEffect(() => { refreshLive(); refreshDeps() }, [])
+      async function refreshBackgrounds() {
+        try {
+          const payload = await (await fetch('/dsh-live-pet/scene/backgrounds', { headers: { accept: 'application/json' } })).json()
+          setBackgrounds(Array.isArray(payload.items) ? payload.items : [])
+        } catch {
+          setBackgrounds([])
+        }
+      }
+
+      React.useEffect(() => { refreshLive(); refreshDeps(); refreshBackgrounds() }, [])
 
       if (pet === null) {
         return h('div', { style: styles.wrap }, h('div', { style: styles.hint }, '正在读取配置…'))
@@ -583,11 +593,29 @@ window.__ModuleLoader__.load({
               onChange: (v) => setPetValue('sceneEnabled', v),
             })),
           h(Row, { label: '背景图' },
+            h(Select, {
+              value: petValue('sceneImage') || '',
+              options: (() => {
+                const list = [['', '插件自带（bg/scene.jpg）']]
+                const seen = new Set([''])
+                for (const item of backgrounds) {
+                  list.push([item.path, item.name])
+                  seen.add(item.path)
+                }
+                const custom = petValue('sceneImage')
+                if (custom && !seen.has(custom)) list.push([custom, custom.split(/[\\/]/).pop() + '（自定义路径）'])
+                return list
+              })(),
+              onChange: (v) => setPetValue('sceneImage', v),
+            }),
+            h('button', { style: styles.button, onClick: refreshBackgrounds }, '重新扫描')),
+          h(Row, { label: '自定义背景' },
             h(Text, {
               value: petValue('sceneImage'),
-              placeholder: '留空 = 用插件自带的那张（bg/scene.jpg）；也可以填本地图片的完整路径',
+              placeholder: '也可以填本地图片的完整路径，例如 D:\\壁纸\\xxx.jpg',
               onChange: (v) => setPetValue('sceneImage', v),
-            })),
+            }),
+            h('span', { style: styles.hint }, '把图片丢进插件的 bg 文件夹，就能在上面那个下拉里选到')),
           h(Row, { label: '气泡字号' },
             h(Number, { value: petValue('bubbleFontSize'), onChange: (v) => setPetValue('bubbleFontSize', v === '' ? 20 : v) }),
             h('span', { style: styles.hint }, '宠物说话的气泡字号，直播建议 20~30')),

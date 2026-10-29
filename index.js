@@ -12,7 +12,7 @@
  * a separate process so a stuck turn can never block the Harness host.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1988,6 +1988,32 @@ export function apply(ctx) {
         }
         return
       }
+      /* ---- 可选背景图列表 ------------------------------------------------ */
+      if (pathname === '/dsh-live-pet/scene/backgrounds') {
+        const dir = join(PKG_DIR, 'bg')
+        const items = []
+        try {
+          for (const entry of readdirSync(dir)) {
+            if (!/\.(jpe?g|png|webp)$/i.test(entry)) continue
+            const full = join(dir, entry)
+            let size = 0
+            try { size = statSync(full).size } catch { size = 0 }
+            items.push({ name: entry, path: full, size })
+          }
+        } catch {
+          // 没有 bg 目录就返回空列表
+        }
+        items.sort((a, b) => a.name.localeCompare(b.name))
+        const custom = String(config.sceneImage || '').trim()
+        sendJson(res, {
+          ok: true,
+          dir,
+          current: custom,
+          items,
+        })
+        return
+      }
+
       if (pathname === '/dsh-live-pet/scene/bg') {
         const file = sceneImagePath()
         if (file === '') {
