@@ -576,6 +576,24 @@ window.__ModuleLoader__.load({
             h('button', { style: styles.buttonPrimary, disabled: busy, onClick: saveLive }, '保存礼物动作'))),
 
         h(Card, { title: '宠物行为', hint: '这些只影响插件，不改直播服务。保存后立即生效。' },
+          h(Row, { label: '直播背景' },
+            h(Check, {
+              label: '铺一张背景图：左上角弹幕池、右上角点歌台（宠物只在背景里活动）',
+              value: petValue('sceneEnabled') === true,
+              onChange: (v) => setPetValue('sceneEnabled', v),
+            })),
+          h(Row, { label: '背景图' },
+            h(Text, {
+              value: petValue('sceneImage'),
+              placeholder: '留空 = 用插件自带的那张（bg/scene.jpg）；也可以填本地图片的完整路径',
+              onChange: (v) => setPetValue('sceneImage', v),
+            })),
+          h(Row, { label: '气泡字号' },
+            h(Number, { value: petValue('bubbleFontSize'), onChange: (v) => setPetValue('bubbleFontSize', v === '' ? 20 : v) }),
+            h('span', { style: styles.hint }, '宠物说话的气泡字号，直播建议 20~30')),
+          h(Row, { label: '弹幕池字号' },
+            h(Number, { value: petValue('poolFontSize'), onChange: (v) => setPetValue('poolFontSize', v === '' ? 20 : v) }),
+            h('span', { style: styles.hint }, '左上角弹幕池的字号，直播建议 20~28')),
           h(Row, { label: '自动溜达' },
             h(Check, {
               label: '让它在桌面上自己走动（走一会儿停一会儿）',

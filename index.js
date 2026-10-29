@@ -11,7 +11,7 @@
  * /api/state, actions go through its own HTTP endpoints, and the DSH session is
  * a separate process so a stuck turn can never block the Harness host.
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, basename } from 'node:path'
@@ -33,6 +33,10 @@ const EMOTIONS = ['happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cookin
 
 /** Plugin keys the settings page may write. */
 const PET_CONFIG_KEYS = [
+  'sceneEnabled',
+  'sceneImage',
+  'bubbleFontSize',
+  'poolFontSize',
   'wander',
   'wanderSpeed',
   'wanderDwellMinSec',
@@ -56,6 +60,14 @@ const LIVE_CONFIG_KEYS = ['douyin', 'songs', 'gift_actions', 'voice', 'rate', 'p
 let liveVoice = null
 
 const DEFAULTS = {
+  /** 直播背景：在背景图上铺弹幕池 + 点歌台，宠物只在背景里活动 */
+  sceneEnabled: false,
+  /** 背景图路径（留空 = 用插件自带的 bg/scene.jpg） */
+  sceneImage: '',
+  /** 宠物对话气泡字号（直播要看得清） */
+  bubbleFontSize: 20,
+  /** 场景里弹幕池的字号 */
+  poolFontSize: 20,
   /** 自动溜达：自己在桌面上走动、停一会儿、再走 */
   wander: true,
   /** 走路速度（像素/秒） */
@@ -709,6 +721,7 @@ export function apply(ctx) {
     session: '',
     actionName: '',
     live: {},
+    pool: [],
   }
 
   /* ---- managed live-service instance ---------------------------------- */
@@ -1303,6 +1316,7 @@ export function apply(ctx) {
           : bullet.gift ? `gift thanks (${bullet.user}: ${bullet.gift})`
             : `reply (${bullet.user})`
       log(`${label}: ${emotion} | ${answer.say}`)
+      pushPool({ kind: 'me', user: '大肥鲸', text: answer.say })
       void runAction(answer.action, bullet)
       if (poseSec > 0) {
         // The pose is a break, not a permanent state: go back to walking unless
@@ -1429,6 +1443,7 @@ export function apply(ctx) {
             const kind = String(row.kind || 'comment')
             const user = String(row.user || '')
             if (kind === 'enter') {
+              pushPool({ kind: 'enter', user, text: '' })
               // 合并欢迎：先进缓冲，2.5 秒内的进场凑一批一起打招呼
               if (config.welcomeEnter === true && welcomeUserAllowed(user)) {
                 addPendingEnter(shortName(user))
@@ -1437,12 +1452,14 @@ export function apply(ctx) {
             }
             if (kind === 'gift') {
               const giftName = String(row.text || '').trim().slice(0, 20)
+              pushPool({ kind: 'gift', user, text: giftName })
               if (config.thanksGift === true && giftName !== '' && shouldThankGift(user)) {
                 queue.push({ user, text: giftName, kind, gift: giftName })
               }
               continue
             }
             if (!kinds.includes(kind)) continue
+            pushPool({ kind, user, text: String(row.text || '') })
             queue.push({ user, text: String(row.text || ''), kind })
           }
           if (rows.length === 0) feedSince = Math.max(feedSince, last)
@@ -1491,6 +1508,133 @@ export function apply(ctx) {
       try { await poll() } catch (error) { log(`poll error: ${error && error.message ? error.message : error}`) }
       if (alive) schedule()
     }, Math.max(300, Number(config.pollMs) || 800))
+  }
+
+  /* ---- 直播场景（背景图 + 弹幕池 + 点歌台） ---------------------------- */
+
+  let sceneChild = null
+  let sceneRectCache = null
+
+  /** 主屏工作区（屏幕坐标），用来摆场景窗口、限制宠物活动范围。 */
+  function screenWorkArea() {
+    if (sceneRectCache !== null) return sceneRectCache
+    const fallback = { left: 0, top: 0, width: 1920, height: 1040 }
+    try {
+      const script = "Add-Type -AssemblyName System.Windows.Forms; $wa=[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; '{0},{1},{2},{3}' -f $wa.Left,$wa.Top,$wa.Width,$wa.Height"
+      const out = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 8000,
+      })
+      const parts = String(out.stdout || '').trim().split(',').map((piece) => Number(piece))
+      if (parts.length === 4 && parts.every((num) => Number.isFinite(num)) && parts[2] > 200) {
+        sceneRectCache = { left: parts[0], top: parts[1], width: parts[2], height: parts[3] }
+        return sceneRectCache
+      }
+    } catch {
+      // 取不到就用兜底值
+    }
+    sceneRectCache = fallback
+    return sceneRectCache
+  }
+
+  /** 往弹幕池里塞一条（直播场景左上角用），最多留 80 条。 */
+  function pushPool(entry) {
+    if (!entry) return
+    state.pool.push({
+      kind: String(entry.kind || 'comment'),
+      user: String(entry.user || '').slice(0, 24),
+      text: String(entry.text || '').slice(0, 120),
+      at: Date.now(),
+    })
+    if (state.pool.length > 80) state.pool.splice(0, state.pool.length - 80)
+  }
+
+
+  function sceneImagePath() {
+    const custom = String(config.sceneImage || '').trim()
+    if (custom !== '' && existsSync(custom)) return custom
+    const bundled = join(PKG_DIR, 'bg', 'scene.jpg')
+    return existsSync(bundled) ? bundled : ''
+  }
+
+  function scenePayload() {
+    const enabled = config.sceneEnabled === true
+    const rect = screenWorkArea()
+    return {
+      enabled,
+      bubbleFontSize: Math.max(10, Math.min(60, Number(config.bubbleFontSize) || 20)),
+      poolFontSize: Math.max(10, Math.min(60, Number(config.poolFontSize) || 20)),
+      imageUrl: enabled && sceneImagePath() !== '' ? '/dsh-live-pet/scene/bg?t=' + Math.round(Date.now() / 60000) : '',
+      // 宠物窗口要的是本地绝对路径（它自己画背景，不走 HTTP）
+      imagePath: enabled ? sceneImagePath() : '',
+      // 宠物只能在背景里活动：把这块矩形交给宠物窗口
+      bounds: enabled ? rect : null,
+    }
+  }
+
+  function edgePath() {
+    const candidates = [
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    ]
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) return candidate
+    }
+    return ''
+  }
+
+  function closeScene() {
+    const child = sceneChild
+    sceneChild = null
+    if (!child) return false
+    try { child.kill('SIGKILL') } catch { /* 已经退出 */ }
+    log('scene window closed')
+    return true
+  }
+
+  function openScene() {
+    if (config.sceneEnabled !== true) return false
+    const edge = edgePath()
+    if (edge === '') { log('scene: 没找到 Edge，场景窗口起不来'); return false }
+    let origin = ''
+    try { origin = ctx.webServer.getOrigin() } catch { origin = '' }
+    if (origin === '') { log('scene: webServer origin 拿不到'); return false }
+    closeScene()
+    const rect = screenWorkArea()
+    const profileDir = join(PKG_DIR, 'scene-profile')
+    try { mkdirSync(profileDir, { recursive: true }) } catch { /* 已存在 */ }
+    try {
+      sceneChild = spawn(edge, [
+        '--app=' + origin + '/dsh-live-pet/scene',
+        '--window-position=' + rect.left + ',' + rect.top,
+        '--window-size=' + rect.width + ',' + rect.height,
+        '--user-data-dir=' + profileDir,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-features=Translate,MediaRouter',
+        '--autoplay-policy=no-user-gesture-required',
+        '--hide-crash-restore-bubble',
+      ], { windowsHide: false, stdio: 'ignore', detached: false })
+      sceneChild.on('exit', (code) => {
+        log('scene window exited (' + code + ')')
+        sceneChild = null
+      })
+      sceneChild.on('error', (error) => log('scene window failed: ' + (error && error.message ? error.message : error)))
+      log('scene window started (pid ' + sceneChild.pid + ') ' + rect.width + 'x' + rect.height)
+      // 起完把它提到最前面（宠物是 topmost，会自然盖在场景上面）
+      const raiseScript = join(PKG_DIR, 'scene-raise.ps1')
+      if (existsSync(raiseScript)) {
+        spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', raiseScript, '-ScenePid', String(sceneChild.pid), '-PetPid', String(petChild && petChild.pid ? petChild.pid : 0)], {
+          windowsHide: true,
+          stdio: 'ignore',
+        })
+      }
+      return true
+    } catch (error) {
+      log('scene spawn failed: ' + (error && error.message ? error.message : error))
+      return false
+    }
   }
 
   /* ---- pet window ------------------------------------------------------ */
@@ -1760,6 +1904,9 @@ export function apply(ctx) {
               const rebuilt = ensurePetProfile(config)
               result.profileRebuilt = rebuilt.ok === true
               log('persona updated -> pet profile ' + (rebuilt.ok === true ? 'rebuilt' : ('rebuild failed: ' + rebuilt.reason)))
+              if (Object.prototype.hasOwnProperty.call(body.pet, 'sceneEnabled')) {
+                log('scene toggled by settings: ' + (config.sceneEnabled === true ? 'on' : 'off'))
+              }
               clearSession(config.sessionKey)
               state.session = ''
               log('persona changed -> pet session reset')
@@ -1816,6 +1963,8 @@ export function apply(ctx) {
         sendJson(res, {
           ...state,
           speaking: state.audioPath !== '' && Date.now() - state.at < Math.max(2000, state.audioDuration * 1000 + 1500),
+          // 直播场景：背景图、字号、宠物可活动范围（屏幕坐标）
+          scene: scenePayload(),
           config: { speak: config.speak, petSilent: config.petSilent, profile: config.profile, appUrl: appBase(), manageLive: config.manageLive === true, livePort: config.livePort },
     // 宠物窗口每轮都读这段：改了设置立刻生效，不用重开窗口
     wander: {
@@ -1827,6 +1976,38 @@ export function apply(ctx) {
         })
         return
       }
+      /* ---- 直播场景页 + 背景图 ------------------------------------------ */
+      if (pathname === '/dsh-live-pet/scene') {
+        try {
+          const html = readFileSync(join(PKG_DIR, 'scene', 'index.html'))
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(html)
+        } catch (error) {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('场景页缺失: ' + (error && error.message ? error.message : error))
+        }
+        return
+      }
+      if (pathname === '/dsh-live-pet/scene/bg') {
+        const file = sceneImagePath()
+        if (file === '') {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('没有背景图')
+          return
+        }
+        try {
+          const data = readFileSync(file)
+          const lower = file.toLowerCase()
+          const type = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg'
+          res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=600' })
+          res.end(data)
+        } catch (error) {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('读背景图失败: ' + (error && error.message ? error.message : error))
+        }
+        return
+      }
+
       if (pathname === '/dsh-live-pet/log') {
         sendJson(res, { lines: logTail(60) })
         return
@@ -1907,6 +2088,7 @@ export function apply(ctx) {
     schedule()
     if (config.idleChat) scheduleIdle()
     if (config.autoStartPet) startPet()
+    closeScene()
     return () => {
       alive = false
       if (timer) clearTimeout(timer)
@@ -1914,6 +2096,7 @@ export function apply(ctx) {
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = null
       stopPet()
+      closeScene()
       if (config.manageLive === true) void stopLive()
       log('dsh-live-pet disposed')
     }

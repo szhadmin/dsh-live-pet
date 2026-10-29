@@ -18,6 +18,8 @@
                   "profile",
                   "frames",
                   "live",
+                  "scene",
+                  "bg",
                   "locale/*.json",
                   "icon.svg",
                   "README.md"
@@ -36,19 +38,5 @@
                                               "@deepseek-ai/dsh-client-ui-settings"
                                           ]
                            }
-            },
-    "repository":  {
-                       "type":  "git",
-                       "url":  "git+https://github.com/szhadmin/dsh-live-pet.git"
-                   },
-    "keywords":  [
-                     "dsh",
-                     "dsh-plugin",
-                     "desktop-pet",
-                     "douyin",
-                     "live",
-                     "tts",
-                     "edge-tts"
-                 ],
-    "license":  "MIT"
+            }
 }

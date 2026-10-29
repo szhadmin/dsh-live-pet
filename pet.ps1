@@ -171,6 +171,55 @@ $script:BoardText.TextWrapping = [System.Windows.TextWrapping]::Wrap
 $script:BoardText.Text = '点歌台'
 $script:Board.Child = $script:BoardText
 
+# 直播场景：背景图 + 左上角弹幕池 + 右上角点歌台，全部画在同一个窗口里
+# （单窗口的好处：OBS 直接抓这个窗口就够了，不用多个来源对齐）
+$script:SceneMode = $false
+$script:PetX = 0.0
+$script:PetY = 0.0
+
+$script:SceneBg = New-Object System.Windows.Controls.Border
+$script:SceneBg.Visibility = 'Collapsed'
+$script:SceneBgBrush = New-Object System.Windows.Media.ImageBrush
+$script:SceneBgBrush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
+$script:SceneBg.Background = $script:SceneBgBrush
+
+$script:PoolPanel = New-Object System.Windows.Controls.Border
+$script:PoolPanel.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(210, 8, 14, 24))
+$script:PoolPanel.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(90, 255, 255, 255))
+$script:PoolPanel.BorderThickness = [System.Windows.Thickness]::new(1)
+$script:PoolPanel.CornerRadius = [System.Windows.CornerRadius]::new(16)
+$script:PoolPanel.Padding = [System.Windows.Thickness]::new(18, 14, 18, 16)
+$script:PoolPanel.HorizontalAlignment = 'Left'
+$script:PoolPanel.VerticalAlignment = 'Top'
+$script:PoolPanel.Margin = [System.Windows.Thickness]::new(28, 26, 0, 0)
+$script:PoolPanel.Width = 600
+$script:PoolPanel.Visibility = 'Collapsed'
+$script:PoolText = New-Object System.Windows.Controls.TextBlock
+$script:PoolText.Foreground = [System.Windows.Media.Brushes]::White
+$script:PoolText.FontSize = 20
+$script:PoolText.LineHeight = 30
+$script:PoolText.TextWrapping = [System.Windows.TextWrapping]::Wrap
+$script:PoolPanel.Child = $script:PoolText
+
+$script:SongPanel = New-Object System.Windows.Controls.Border
+$script:SongPanel.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(210, 8, 14, 24))
+$script:SongPanel.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(90, 255, 255, 255))
+$script:SongPanel.BorderThickness = [System.Windows.Thickness]::new(1)
+$script:SongPanel.CornerRadius = [System.Windows.CornerRadius]::new(16)
+$script:SongPanel.Padding = [System.Windows.Thickness]::new(18, 14, 18, 16)
+$script:SongPanel.HorizontalAlignment = 'Right'
+$script:SongPanel.VerticalAlignment = 'Top'
+$script:SongPanel.Margin = [System.Windows.Thickness]::new(0, 26, 28, 0)
+$script:SongPanel.Width = 360
+$script:SongPanel.Visibility = 'Collapsed'
+$script:SongText = New-Object System.Windows.Controls.TextBlock
+$script:SongText.Foreground = [System.Windows.Media.Brushes]::White
+$script:SongText.FontSize = 18
+$script:SongText.LineHeight = 27
+$script:SongText.TextWrapping = [System.Windows.TextWrapping]::Wrap
+$script:SongPanel.Child = $script:SongText
+
+# 宠物本体（含气泡和输入条）放在一个 host 里，场景模式下靠 Margin 在背景里移动
 $shell = New-Object System.Windows.Controls.Grid
 $colPet = New-Object System.Windows.Controls.ColumnDefinition
 $colPet.Width = New-Object System.Windows.GridLength(1.0, [System.Windows.GridUnitType]::Star)
@@ -183,6 +232,7 @@ $colBoard.Width = New-Object System.Windows.GridLength(0, [System.Windows.GridUn
 [System.Windows.Controls.Grid]::SetColumn($script:Board, 0)
 [System.Windows.Controls.Grid]::SetColumn($grid, 1)
 [void]$shell.Children.Add($script:Board)
+$script:Shell = $shell
 $script:Window = New-Object System.Windows.Window
 $script:Window.Title = '小鲸鱼直播宠物'
 $script:Window.WindowStyle = [System.Windows.WindowStyle]::None
@@ -192,13 +242,24 @@ $script:Window.Topmost = $true
 $script:Window.ShowInTaskbar = $false
 $script:Window.ResizeMode = [System.Windows.ResizeMode]::NoResize
 $script:Window.WindowStartupLocation = [System.Windows.WindowStartupLocation]::Manual
-$script:Window.Content = $shell
+$root = New-Object System.Windows.Controls.Grid
+[void]$root.Children.Add($script:SceneBg)
+[void]$root.Children.Add($script:PoolPanel)
+[void]$root.Children.Add($script:SongPanel)
+[void]$root.Children.Add($shell)
+[System.Windows.Controls.Panel]::SetZIndex($script:PoolPanel, 1)
+[System.Windows.Controls.Panel]::SetZIndex($script:SongPanel, 1)
+[System.Windows.Controls.Panel]::SetZIndex($shell, 2)
+$script:Shell.HorizontalAlignment = 'Stretch'
+$script:Shell.VerticalAlignment = 'Stretch'
+$script:Window.Content = $root
 
 # 隐藏启动时 Windows 会把 SW_HIDE 用在第一个顶层窗口上，这里显式显示
 $script:Win32Ready = $false
 try {
     Add-Type -Namespace PetNative3 -Name WindowApi -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 '@
     $script:Win32Ready = $true
 } catch { }
@@ -211,6 +272,24 @@ $script:Window.Add_SourceInitialized({
 })
 
 $script:PositionFile = Join-Path $script:Root 'pet-window.json'
+
+# 读宠物当前位置（场景模式是窗口内坐标，普通模式是屏幕坐标）
+function Get-PetPos {
+    if ($script:SceneMode) { return @{ Left = [double]$script:PetX; Top = [double]$script:PetY } }
+    return @{ Left = [double]$script:Window.Left; Top = [double]$script:Window.Top }
+}
+
+# 设置宠物位置（场景模式移动 host 的 Margin）
+function Set-PetPos([double]$Left, [double]$Top) {
+    if ($script:SceneMode) {
+        $script:PetX = $Left
+        $script:PetY = $Top
+        $script:Shell.Margin = New-Object System.Windows.Thickness($Left, $Top, 0, 0)
+        return
+    }
+    $script:Window.Left = $Left
+    $script:Window.Top = $Top
+}
 
 function Save-Position {
     try {
@@ -226,7 +305,33 @@ function Save-Position {
 }
 
 function Clamp-ToScreen {
+    if ($script:SceneMode) {
+        $pos = Get-PetPos
+        $maxX = [Math]::Max(0, $script:Window.Width - $script:PetWidth)
+        $maxY = [Math]::Max(0, $script:Window.Height - $script:PetBodyHeight)
+        $x = [Math]::Max(0, [Math]::Min($maxX, $pos.Left))
+        $y = [Math]::Max(0, [Math]::Min($maxY, $pos.Top))
+        Set-PetPos $x $y
+        return
+    }
     $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    if ($null -ne $script:SceneBounds) {
+        # 场景模式下活动范围就是背景矩形
+        $sb = $script:SceneBounds
+        $extraB = $script:BoardExtra
+        if (-not $extraB) { $extraB = 0 }
+        $wB = $script:PetWidth
+        if (-not $wB -or $wB -lt 100) { $wB = $script:Window.Width }
+        $petLeft = $script:Window.Left + $extraB
+        if ($petLeft -lt $sb.left) { $petLeft = $sb.left }
+        if ($petLeft -gt ($sb.left + $sb.width - $wB)) { $petLeft = $sb.left + $sb.width - $wB }
+        $top = $script:Window.Top
+        if ($top -lt $sb.top) { $top = $sb.top }
+        if ($top -gt ($sb.top + $sb.height - $script:Window.Height)) { $top = $sb.top + $sb.height - $script:Window.Height }
+        $script:Window.Left = $petLeft - $extraB
+        $script:Window.Top = $top
+        return
+    }
     # 只保证宠物本体在屏幕内；歌单板允许挂到屏幕外，这样开关板子时宠物不会乱跑
     $width = $script:PetWidth
     if (-not $width -or $width -lt 100) { $width = $script:Window.Width }
@@ -279,9 +384,17 @@ function Apply-Size([double]$NewScale, [switch]$KeepAnchor) {
     $boardExtra = 0
     if ($script:BoardEnabled -and $script:BoardVisible) { $boardExtra = $script:BoardWidth + 16 }
     $script:PetWidth = [Math]::Max(300, $pixels + 40)
-    $script:Window.Width = $script:PetWidth + $boardExtra
-    $script:Window.Height = $script:BubbleArea + $pixels
+    $script:PetBodyHeight = $script:BubbleArea + $pixels
     $script:BoardExtra = $boardExtra
+    if ($script:SceneMode) {
+        # 场景模式：窗口铺满屏幕，宠物本体单独缩放
+        $script:Shell.Width = $script:PetWidth
+        $script:Shell.Height = $script:PetBodyHeight
+        Clamp-ToScreen
+        return
+    }
+    $script:Window.Width = $script:PetWidth + $boardExtra
+    $script:Window.Height = $script:PetBodyHeight
     $script:Window.Left = $petLeft - $boardExtra
     if ($KeepAnchor) {
         $script:Window.Left = $script:Window.Left + ($oldWidth - $script:Window.Width)
@@ -296,6 +409,7 @@ $script:Timer = New-Object System.Windows.Threading.DispatcherTimer
 $script:Poll = New-Object System.Windows.Threading.DispatcherTimer
 $script:HideTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:SquashTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:TopTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:CurrentState = 'walking'
 $script:FrameIndex = 0
 $script:LastSeq = -1
@@ -346,6 +460,22 @@ function Invoke-Squash {
     $script:SquashStep = 0
     $script:SquashTimer.Stop()
     $script:SquashTimer.Start()
+}
+
+function Reassert-Topmost {
+    if (-not $script:Win32Ready) { return }
+    try {
+        $helper = New-Object System.Windows.Interop.WindowInteropHelper($script:Window)
+        if ($helper.Handle -eq [IntPtr]::Zero) { return }
+        if ($script:SceneMode) {
+            # 场景模式：顺手把窗口按回 (0,0) 全屏，别让系统把它挪到副屏去
+            $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+            [void][PetNative3.WindowApi]::SetWindowPos($helper.Handle, [IntPtr](-1), [int]$wa.Left, [int]$wa.Top, [int]$wa.Width, [int]$wa.Height, 0x0040)
+            return
+        }
+        # HWND_TOPMOST = -1, SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW
+        [void][PetNative3.WindowApi]::SetWindowPos($helper.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0001 -bor 0x0002 -bor 0x0040)
+    } catch { }
 }
 
 function Step-Squash {
@@ -482,6 +612,134 @@ function Update-Board($state) {
     if ($script:BoardText.Text -ne $text) { $script:BoardText.Text = $text }
 }
 
+# 切换直播场景模式：窗口铺满屏幕 + 显示背景和两块面板
+function Set-SceneMode([bool]$On, [string]$ImagePath) {
+    if ($On -eq $script:SceneMode) {
+        if ($On -and $ImagePath -ne '') { Ensure-SceneImage $ImagePath }
+        return
+    }
+    $script:SceneMode = $On
+    if ($On) {
+        $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        $script:PetX = [double]([Math]::Max(0, $wa.Width - $script:PetWidth - 240))
+        $script:PetY = [double]([Math]::Max(0, $wa.Height - $script:PetBodyHeight - 40))
+        $script:Window.WindowState = 'Normal'
+        $script:Window.Width = $wa.Width
+        $script:Window.Height = $wa.Height
+        $script:Window.Left = $wa.Left
+        $script:Window.Top = $wa.Top
+        Move-WindowRect ([int]$wa.Left) ([int]$wa.Top) ([int]$wa.Width) ([int]$wa.Height)
+        $script:SceneBg.Visibility = 'Visible'
+        $script:PoolPanel.Visibility = 'Visible'
+        $script:SongPanel.Visibility = 'Visible'
+        $script:Shell.HorizontalAlignment = 'Left'
+        $script:Shell.VerticalAlignment = 'Top'
+        $script:Shell.Width = $script:PetWidth
+        $script:Shell.Height = $script:PetBodyHeight
+        if ($ImagePath -ne '') { Ensure-SceneImage $ImagePath }
+        Set-PetPos $script:PetX $script:PetY
+        Write-PetLog 'scene mode on: 背景 + 弹幕池 + 点歌台'
+        return
+    }
+    $script:Window.Width = $script:PetWidth + $script:BoardExtra
+    $script:Window.Height = $script:PetBodyHeight
+    $script:SceneBg.Visibility = 'Collapsed'
+    $script:PoolPanel.Visibility = 'Collapsed'
+    $script:SongPanel.Visibility = 'Collapsed'
+    $script:Shell.HorizontalAlignment = 'Stretch'
+    $script:Shell.VerticalAlignment = 'Stretch'
+    $script:Shell.Width = [double]::NaN
+    $script:Shell.Height = [double]::NaN
+    $script:Shell.Margin = New-Object System.Windows.Thickness(0, 0, 0, 0)
+    $script:BgLoaded = ''
+    Write-PetLog 'scene mode off'
+}
+
+# 用 Win32 把窗口硬摆到指定矩形（WPF 的 Left/Top 在透明无边框窗口上偶尔不生效）
+function Move-WindowRect([int]$X, [int]$Y, [int]$W, [int]$H) {
+    try {
+        if (-not $script:Win32Ready) { return }
+        $helper = New-Object System.Windows.Interop.WindowInteropHelper($script:Window)
+        if ($helper.Handle -eq [IntPtr]::Zero) { return }
+        # SWP_NOZORDER=0x0004, SWP_SHOWWINDOW=0x0040
+        [void][PetNative3.WindowApi]::SetWindowPos($helper.Handle, [IntPtr]::Zero, $X, $Y, $W, $H, 0x0004 -bor 0x0040)
+    } catch {
+        Write-PetLog ('move window failed: ' + $_.Exception.Message)
+    }
+}
+
+$script:BgLoaded = ''
+function Ensure-SceneImage([string]$Path) {
+    if ($Path -eq $script:BgLoaded) { return }
+    try {
+        $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+        $bitmap.BeginInit()
+        $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $bitmap.UriSource = New-Object System.Uri($Path)
+        $bitmap.EndInit()
+        $bitmap.Freeze()
+        $script:SceneBgBrush.ImageSource = $bitmap
+        $script:BgLoaded = $Path
+        Write-PetLog ('scene background -> ' + $Path)
+    } catch {
+        Write-PetLog ('scene background failed: ' + $_.Exception.Message)
+    }
+}
+
+# 刷新左上角弹幕池和右上角点歌台
+function Update-ScenePanels($state) {
+    if (-not $script:SceneMode) { return }
+
+    $poolLines = New-Object System.Collections.Generic.List[string]
+    if ($state.PSObject.Properties.Name -contains 'pool') {
+        $items = @($state.pool)
+        $tail = if ($items.Count -gt 10) { $items[($items.Count - 10)..($items.Count - 1)] } else { $items }
+        foreach ($item in $tail) {
+            $who = [string]$item.user
+            if ([string]::IsNullOrWhiteSpace($who)) { $who = '观众' }
+            $text = [string]$item.text
+            switch ([string]$item.kind) {
+                'gift' { [void]$poolLines.Add(('[礼物] ' + $who + ' ' + $text)) }
+                'enter' { [void]$poolLines.Add(('[进场] ' + $who)) }
+                'me' { [void]$poolLines.Add(('[我] ' + $text)) }
+                default { [void]$poolLines.Add(($who + ': ' + $text)) }
+            }
+        }
+    }
+    $poolTitle = '弹幕池'
+    if ($poolLines.Count -eq 0) { [void]$poolLines.Add('还没人说话…') }
+    $poolText = $poolTitle + [Environment]::NewLine + [Environment]::NewLine + [string]::Join([Environment]::NewLine, $poolLines)
+    if ($script:PoolText.Text -ne $poolText) { $script:PoolText.Text = $poolText }
+
+    $songLines = New-Object System.Collections.Generic.List[string]
+    $songs = $null
+    if ($state.PSObject.Properties.Name -contains 'songs') { $songs = $state.songs }
+    $playing = $null -ne $songs -and $songs.playing -eq $true -and -not [string]::IsNullOrWhiteSpace([string]$songs.title)
+    if ($playing) {
+        [void]$songLines.Add('正在放：')
+        [void]$songLines.Add([string]$songs.title)
+        $artist = [string]$songs.artist
+        if (-not [string]::IsNullOrWhiteSpace($artist)) { [void]$songLines.Add($artist) }
+    } else {
+        [void]$songLines.Add('喊首歌名，我就点上')
+    }
+    if ($null -ne $songs -and $null -ne $songs.queue) {
+        $queue = @($songs.queue)
+        if ($queue.Count -gt 0) {
+            [void]$songLines.Add('')
+            [void]$songLines.Add('排队中：')
+            $max = [Math]::Min(5, $queue.Count)
+            for ($i = 0; $i -lt $max; $i++) {
+                $title = [string]$queue[$i].title
+                if ($title.Length -gt 14) { $title = $title.Substring(0, 14) + '…' }
+                [void]$songLines.Add(('{0}. {1}' -f ($i + 1), $title))
+            }
+        }
+    }
+    $songText = '点歌台' + [Environment]::NewLine + [Environment]::NewLine + [string]::Join([Environment]::NewLine, $songLines)
+    if ($script:SongText.Text -ne $songText) { $script:SongText.Text = $songText }
+}
+
 function Apply-State($state) {
     Update-Board $state
     if ($null -eq $state) {
@@ -505,6 +763,28 @@ function Apply-State($state) {
             Clear-LocalEmotion
         }
     }
+
+    # 直播场景：开关、背景图、字号（每轮都读，改设置立刻生效）
+    if ($state.PSObject.Properties.Name -contains 'scene') {
+        $sc = $state.scene
+        Set-SceneMode ([bool]$sc.enabled) ([string]$sc.imagePath)
+        $poolFont = [double]$sc.poolFontSize
+        if ($poolFont -ge 10 -and $poolFont -le 60 -and [Math]::Abs($poolFont - $script:PoolText.FontSize) -gt 0.1) {
+            $script:PoolText.FontSize = $poolFont
+            $script:PoolText.LineHeight = [Math]::Round($poolFont * 1.5)
+            $script:SongText.FontSize = [Math]::Max(12, $poolFont - 2)
+            $script:SongText.LineHeight = [Math]::Round([Math]::Max(12, $poolFont - 2) * 1.5)
+        }
+        $fontSize = [double]$sc.bubbleFontSize
+        if ($fontSize -ge 10 -and $fontSize -le 60 -and [Math]::Abs($fontSize - $script:BubbleFontSize) -gt 0.1) {
+            $script:BubbleFontSize = $fontSize
+            $script:BubbleText.FontSize = $fontSize
+            $script:BubbleText.LineHeight = [Math]::Round($fontSize * 1.5)
+            $script:Bubble.MaxWidth = [Math]::Round($fontSize * 16)
+            Write-PetLog ('bubble font -> ' + $fontSize)
+        }
+    }
+    Update-ScenePanels $state
 
     $emotion = [string]$state.emotion
     if ($script:Emotions -notcontains $emotion) { $emotion = 'walking' }
@@ -556,6 +836,10 @@ $script:WanderLastTick = $null
 $script:WanderIdleEmotion = 'happy'
 $script:LocalEmotion = ''
 $script:LocalEmotionUntil = [DateTime]::MinValue
+
+# 直播背景模式：宠物只能在这块矩形里活动（屏幕坐标），空 = 不受限
+$script:SceneBounds = $null
+$script:BubbleFontSize = 13
 # 情绪保护期：刚哭/刚笑的时候别让溜达把它顶掉
 $script:EmotionHoldUntil = [DateTime]::MinValue
 
@@ -600,6 +884,26 @@ function Clear-LocalEmotion {
 }
 
 function Get-PetBounds {
+    if ($script:SceneMode) {
+        # 场景模式：宠物在整块背景（本窗口）里活动
+        return @{
+            MinLeft = [double]0
+            MaxLeft = [double][Math]::Max(0, $script:Window.Width - $script:PetWidth)
+            MinTop = [double]0
+            MaxTop = [double][Math]::Max(0, $script:Window.Height - $script:PetBodyHeight)
+        }
+    }
+    if ($null -ne $script:SceneBounds) {
+        $sb = $script:SceneBounds
+        $wS = $script:PetWidth
+        if (-not $wS -or $wS -lt 100) { $wS = $script:Window.Width }
+        return @{
+            MinLeft = [double]$sb.left
+            MaxLeft = [double]($sb.left + $sb.width - $wS)
+            MinTop = [double]$sb.top
+            MaxTop = [double]($sb.top + $sb.height - $script:Window.Height)
+        }
+    }
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $extra = $script:BoardExtra
     if (-not $extra) { $extra = 0 }
@@ -618,8 +922,9 @@ function Wander-PickTarget {
     # 当前宠物本体的位置（窗口 left 里带了板子的偏移）
     $extra = $script:BoardExtra
     if (-not $extra) { $extra = 0 }
-    $curLeft = $script:Window.Left + $extra
-    $curTop = $script:Window.Top
+    $posNow = Get-PetPos
+    $curLeft = $posNow.Left + $extra
+    $curTop = $posNow.Top
     $best = $null
     for ($i = 0; $i -lt 12; $i++) {
         $x = $bounds.MinLeft + (Get-Random -Minimum 0 -Maximum ([Math]::Max(1, [int]($bounds.MaxLeft - $bounds.MinLeft))))
@@ -639,7 +944,8 @@ function Wander-BeginMove {
     $script:WanderTargetY = $target.Y
     $extra = $script:BoardExtra
     if (-not $extra) { $extra = 0 }
-    $dx = $script:WanderTargetX - ($script:Window.Left + $extra)
+    $posBegin = Get-PetPos
+    $dx = $script:WanderTargetX - ($posBegin.Left + $extra)
     if ([Math]::Abs($dx) -gt 4) {
         # 素材默认朝左（尾巴甩在右后方），所以：往左走保持原样，往右走才镜像
         if ($dx -gt 0) { $script:Flip.ScaleX = -1.0 } else { $script:Flip.ScaleX = 1.0 }
@@ -671,8 +977,9 @@ function Step-Wander {
 
     $extra = $script:BoardExtra
     if (-not $extra) { $extra = 0 }
-    $curX = $script:Window.Left + $extra
-    $curY = $script:Window.Top
+    $posStep = Get-PetPos
+    $curX = $posStep.Left + $extra
+    $curY = $posStep.Top
     $dx = $script:WanderTargetX - $curX
     $dy = $script:WanderTargetY - $curY
     $distance = [Math]::Sqrt($dx * $dx + $dy * $dy)
@@ -680,8 +987,7 @@ function Step-Wander {
     $step = $speed * $dt
 
     if ($distance -le $step -or $distance -lt 2) {
-        $script:Window.Left = $script:WanderTargetX - $extra
-        $script:Window.Top = $script:WanderTargetY
+        Set-PetPos ($script:WanderTargetX - $extra) $script:WanderTargetY
         $script:WanderMoving = $false
         $script:WanderTimer.Stop()
         # 到了就换个心情歇一会儿，再继续溜达
@@ -695,8 +1001,7 @@ function Step-Wander {
 
     $nextX = $curX + ($dx / $distance) * $step
     $nextY = $curY + ($dy / $distance) * $step
-    $script:Window.Left = $nextX - $extra
-    $script:Window.Top = $nextY
+    Set-PetPos ($nextX - $extra) $nextY
 }
 
 $script:WanderTimer.Interval = [TimeSpan]::FromMilliseconds(30)
@@ -832,6 +1137,8 @@ $script:Window.ContextMenu = $menu
 $script:Timer.Add_Tick({ Step-Frame })
 $script:SquashTimer.Interval = [TimeSpan]::FromMilliseconds(45)
 $script:SquashTimer.Add_Tick({ Step-Squash })
+$script:TopTimer.Interval = [TimeSpan]::FromMilliseconds(3000)
+$script:TopTimer.Add_Tick({ Reassert-Topmost })
 $script:HideTimer.Add_Tick({ $script:HideTimer.Stop(); $script:Bubble.Visibility = 'Collapsed' })
 $script:Poll.Interval = [TimeSpan]::FromMilliseconds(700)
 $script:Poll.Add_Tick({ Apply-State (Fetch-State) })
@@ -852,6 +1159,7 @@ Restore-Position
 Apply-Size $script:Scale
 Set-PetState 'walking'
 $script:Poll.Start()
+$script:TopTimer.Start()
 Wander-ScheduleNext
 Write-PetLog ('window started at scale {0}, state url = {1}' -f $script:Scale, $script:StateUrl)
 
