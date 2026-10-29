@@ -114,7 +114,7 @@ def add_event(kind: str, text: str, user: str = "") -> None:
 AUDIENCE_KINDS = ("comment", "gift", "enter", "like", "follow")
 
 
-def add_inbound(kind: str, user: str, text: str) -> None:
+def add_inbound(kind: str, user: str, text: str, line: str = "") -> None:
     """记一条原始入站事件，供 GET /api/feed 增量读取（只记录，不改变任何业务行为）。"""
     with LOCK:
         INBOUND_SEQ[0] += 1
@@ -124,6 +124,7 @@ def add_inbound(kind: str, user: str, text: str) -> None:
             "kind": kind,
             "user": user,
             "text": text,
+            "line": line,
         })
 
 
@@ -761,7 +762,7 @@ def handle_event(event: dict) -> None:
     text = str(event.get("text") or "").strip()
 
     # 原始入站流水（外部插件读它来驱动直播宠物）；异常一律吞掉，绝不影响直播
-    if kind in AUDIENCE_KINDS:
+    if kind in AUDIENCE_KINDS and kind != "gift":
         try:
             add_inbound(kind, user, text or str(event.get("gift") or ""))
         except Exception:
@@ -835,6 +836,10 @@ def handle_event(event: dict) -> None:
         publish_action(action, user, gift, count, gift_value, action_line)
 
         total_text = f"{gift}×{count}" if count > 1 else gift
+        try:                                  # 带上动作主题话术，宠物直接念（不走模型）
+            add_inbound("gift", user, total_text, action_line)
+        except Exception:
+            pass
         with LOCK:
             STATE["gifts"] += 1
             STATE["gift_value"] = round(STATE["gift_value"] + gift_value, 1)
@@ -1711,7 +1716,11 @@ class Handler(BaseHTTPRequestHandler):
             if hit:
                 name, args = hit
         cfg = config.load()
-        result = tools.run(name, args, cfg.get("tools") or {})
+        try:
+            result = tools.run(name, args, cfg.get("tools") or {})
+        except Exception as exc:
+            # 第三方接口抽风不该把整轮回复打崩
+            result = {"ok": False, "text": f"工具出错（{type(exc).__name__}）", "speak": ""}
         add_event("tool", f"🔧 {name}：{result.get('text', '')}")
         return self.json({"ok": bool(result.get("ok")), "result": result,
                           "catalog": tools.CATALOG})

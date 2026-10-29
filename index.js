@@ -1012,7 +1012,9 @@ let fixedChain = Promise.resolve()
 function speakFixed(text, emotion) {
   const line = String(text || '').trim().slice(0, 80)
   if (line === '') return Promise.resolve()
-  const mood = EMOTIONS.includes(emotion) ? emotion : 'happy'
+  const mood = EMOTIONS.includes(emotion)
+    ? emotion
+    : (EMOTIONS.includes(String(state.emotion || '')) ? state.emotion : 'happy')
   fixedChain = fixedChain.then(async () => {
     try {
       const speech = config.speak === false ? null : await synthesize(config, line)
@@ -1041,6 +1043,25 @@ function speakFixed(text, emotion) {
 /** 点赞合并：窗口内的点赞凑一句「谢谢 A、B、C 的点赞」 */
 const likeBuffer = []
 let likeTimer = null
+/* 礼物答谢节流：全局间隔 + 同一人间隔（配置项 giftThanksGapSec / giftThanksUserGapSec）。
+ * 新版漏了这个函数，feed 循环一遇到礼物就抛 ReferenceError，整个 feed 掉线 30 秒。 */
+const giftThankedAt = new Map()
+let lastGiftThankAt = 0
+function shouldThankGift(user) {
+  const now = Date.now()
+  const gapMs = Math.max(0, Number(config.giftThanksGapSec) || 0) * 1000
+  if (gapMs > 0 && now - lastGiftThankAt < gapMs) return false
+  const userGapMs = Math.max(0, Number(config.giftThanksUserGapSec) || 0) * 1000
+  const last = giftThankedAt.get(user) || 0
+  if (userGapMs > 0 && now - last < userGapMs) return false
+  lastGiftThankAt = now
+  giftThankedAt.set(user, now)
+  if (giftThankedAt.size > 500) {
+    const oldest = Array.from(giftThankedAt.entries()).sort((a, b) => a[1] - b[1])[0]
+    if (oldest) giftThankedAt.delete(oldest[0])
+  }
+  return true
+}
 function addLikeThanks(name) {
   if (name && likeBuffer.indexOf(name) < 0 && likeBuffer.length < 40) likeBuffer.push(name)
   if (likeTimer) return
@@ -1552,7 +1573,11 @@ function addFastEnter(name) {
             if (kind === 'gift') {
               const giftName = String(row.text || '').trim().slice(0, 20)
               pushPool({ kind: 'gift', user, text: giftName })
-              if (config.thanksGift === true && giftName !== '' && shouldThankGift(user)) {
+              const presetLine = String(row.line || '').trim()
+              if (config.thanksGift === true && presetLine !== '') {
+                // app 已按礼物动作生成了带主题的话术：直接念，不等模型（快，也不会被工具报错打断）
+                void speakFixed(presetLine, '')
+              } else if (config.thanksGift === true && giftName !== '' && shouldThankGift(user)) {
                 queue.push({ user, text: giftName, kind, gift: giftName })
               }
               continue
