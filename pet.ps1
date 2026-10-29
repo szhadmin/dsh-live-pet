@@ -194,12 +194,25 @@ $script:PoolPanel.VerticalAlignment = 'Top'
 $script:PoolPanel.Margin = [System.Windows.Thickness]::new(28, 26, 0, 0)
 $script:PoolPanel.Width = 600
 $script:PoolPanel.Visibility = 'Collapsed'
-$script:PoolText = New-Object System.Windows.Controls.TextBlock
-$script:PoolText.Foreground = [System.Windows.Media.Brushes]::White
-$script:PoolText.FontSize = 20
-$script:PoolText.LineHeight = 30
-$script:PoolText.TextWrapping = [System.Windows.TextWrapping]::Wrap
-$script:PoolPanel.Child = $script:PoolText
+# 弹幕池：一行一个 TextBlock，按类型上色，越旧越淡
+$script:PoolFontSize = 20
+$script:PoolSignature = ''
+$script:PoolRows = New-Object System.Windows.Controls.StackPanel
+$script:PoolRows.VerticalAlignment = 'Bottom'
+$script:PoolScroll = New-Object System.Windows.Controls.ScrollViewer
+$script:PoolScroll.VerticalScrollBarVisibility = 'Hidden'
+$script:PoolScroll.HorizontalScrollBarVisibility = 'Disabled'
+$script:PoolScroll.Content = $script:PoolRows
+$script:PoolTitle = New-Object System.Windows.Controls.TextBlock
+$script:PoolTitle.Text = '弹幕池'
+$script:PoolTitle.Foreground = [System.Windows.Media.Brushes]::White
+$script:PoolTitle.FontSize = 20
+$script:PoolTitle.FontWeight = 'Bold'
+$script:PoolTitle.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
+$script:PoolHost = New-Object System.Windows.Controls.StackPanel
+[void]$script:PoolHost.Children.Add($script:PoolTitle)
+[void]$script:PoolHost.Children.Add($script:PoolScroll)
+$script:PoolPanel.Child = $script:PoolHost
 
 $script:SongPanel = New-Object System.Windows.Controls.Border
 $script:SongPanel.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(210, 8, 14, 24))
@@ -217,7 +230,59 @@ $script:SongText.Foreground = [System.Windows.Media.Brushes]::White
 $script:SongText.FontSize = 18
 $script:SongText.LineHeight = 27
 $script:SongText.TextWrapping = [System.Windows.TextWrapping]::Wrap
-$script:SongPanel.Child = $script:SongText
+# 当前播放进度条
+$script:SongTrack = New-Object System.Windows.Controls.Border
+$script:SongTrack.Height = 6
+$script:SongTrack.CornerRadius = [System.Windows.CornerRadius]::new(3)
+$script:SongTrack.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(90, 255, 255, 255))
+$script:SongTrack.Margin = [System.Windows.Thickness]::new(0, 10, 0, 0)
+$script:SongFill = New-Object System.Windows.Shapes.Rectangle
+$script:SongFill.Height = 6
+$script:SongFill.Width = 0
+$script:SongFill.RadiusX = 3
+$script:SongFill.RadiusY = 3
+$script:SongFill.HorizontalAlignment = 'Left'
+$script:SongFill.Fill = New-Object System.Windows.Media.LinearGradientBrush(
+    [System.Windows.Media.Color]::FromArgb(255, 74, 222, 128),
+    [System.Windows.Media.Color]::FromArgb(255, 56, 189, 248),
+    [System.Windows.Point]::new(0, 0.5),
+    [System.Windows.Point]::new(1, 0.5))
+$script:SongTrack.Child = $script:SongFill
+$script:SongClock = New-Object System.Windows.Controls.TextBlock
+$script:SongClock.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(180, 234, 242, 255))
+$script:SongClock.FontSize = 14
+$script:SongClock.Margin = [System.Windows.Thickness]::new(0, 6, 0, 0)
+$script:SongHost = New-Object System.Windows.Controls.StackPanel
+[void]$script:SongHost.Children.Add($script:SongText)
+[void]$script:SongHost.Children.Add($script:SongTrack)
+[void]$script:SongHost.Children.Add($script:SongClock)
+$script:SongPanel.Child = $script:SongHost
+
+# 左下角：本场数据（开播时长 / 弹幕 / 礼物 / 队列）
+$script:StatsPanel = New-Object System.Windows.Controls.Border
+$script:StatsPanel.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(210, 8, 14, 24))
+$script:StatsPanel.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(90, 255, 255, 255))
+$script:StatsPanel.BorderThickness = [System.Windows.Thickness]::new(1)
+$script:StatsPanel.CornerRadius = [System.Windows.CornerRadius]::new(14)
+$script:StatsPanel.Padding = [System.Windows.Thickness]::new(16, 12, 16, 14)
+$script:StatsPanel.HorizontalAlignment = 'Left'
+$script:StatsPanel.VerticalAlignment = 'Bottom'
+$script:StatsPanel.Margin = [System.Windows.Thickness]::new(28, 0, 0, 26)
+$script:StatsPanel.Width = 300
+$script:StatsPanel.Visibility = 'Collapsed'
+$script:StatsText = New-Object System.Windows.Controls.TextBlock
+$script:StatsText.Foreground = [System.Windows.Media.Brushes]::White
+$script:StatsText.FontSize = 16
+$script:StatsText.LineHeight = 25
+$script:StatsText.TextWrapping = [System.Windows.TextWrapping]::Wrap
+$script:StatsPanel.Child = $script:StatsText
+
+# 烟花特效层：盖在最上面，不挡鼠标
+$script:FxLayer = New-Object System.Windows.Controls.Canvas
+$script:FxLayer.IsHitTestVisible = $false
+$script:Particles = New-Object System.Collections.ArrayList
+$script:LastGiftFxAt = 0.0
+$script:FxTimer = New-Object System.Windows.Threading.DispatcherTimer
 
 # 宠物本体（含气泡和输入条）放在一个 host 里，场景模式下靠 Margin 在背景里移动
 $shell = New-Object System.Windows.Controls.Grid
@@ -246,10 +311,14 @@ $root = New-Object System.Windows.Controls.Grid
 [void]$root.Children.Add($script:SceneBg)
 [void]$root.Children.Add($script:PoolPanel)
 [void]$root.Children.Add($script:SongPanel)
+[void]$root.Children.Add($script:StatsPanel)
 [void]$root.Children.Add($shell)
+[void]$root.Children.Add($script:FxLayer)
 [System.Windows.Controls.Panel]::SetZIndex($script:PoolPanel, 1)
 [System.Windows.Controls.Panel]::SetZIndex($script:SongPanel, 1)
+[System.Windows.Controls.Panel]::SetZIndex($script:StatsPanel, 1)
 [System.Windows.Controls.Panel]::SetZIndex($shell, 2)
+[System.Windows.Controls.Panel]::SetZIndex($script:FxLayer, 3)
 $script:Shell.HorizontalAlignment = 'Stretch'
 $script:Shell.VerticalAlignment = 'Stretch'
 $script:Window.Content = $root
@@ -637,6 +706,10 @@ function Set-SceneMode([bool]$On, [string]$ImagePath) {
         $script:SceneBg.Visibility = 'Visible'
         $script:PoolPanel.Visibility = 'Visible'
         $script:SongPanel.Visibility = 'Visible'
+        $script:StatsPanel.Visibility = 'Visible'
+        $script:FxLayer.Visibility = 'Visible'
+        $script:FxTimer.Interval = [TimeSpan]::FromMilliseconds(33)
+        if (-not $script:FxTimer.IsEnabled -and $script:Particles.Count -gt 0) { $script:FxTimer.Start() }
         $script:Shell.HorizontalAlignment = 'Left'
         $script:Shell.VerticalAlignment = 'Top'
         $script:Shell.Width = $script:PetWidth
@@ -656,6 +729,11 @@ function Set-SceneMode([bool]$On, [string]$ImagePath) {
     $script:SceneBg.Visibility = 'Collapsed'
     $script:PoolPanel.Visibility = 'Collapsed'
     $script:SongPanel.Visibility = 'Collapsed'
+    $script:StatsPanel.Visibility = 'Collapsed'
+    $script:FxLayer.Visibility = 'Collapsed'
+    $script:FxTimer.Stop()
+    $script:FxLayer.Children.Clear()
+    $script:Particles.Clear()
     $script:Shell.HorizontalAlignment = 'Stretch'
     $script:Shell.VerticalAlignment = 'Stretch'
     $script:Shell.Width = [double]::NaN
@@ -697,57 +775,246 @@ function Ensure-SceneImage([string]$Path) {
 }
 
 # 刷新左上角弹幕池和右上角点歌台
+# 秒 -> mm:ss
+function Format-Clock([int]$Seconds) {
+    if ($Seconds -lt 0) { $Seconds = 0 }
+    $m = [int][Math]::Floor($Seconds / 60)
+    $s = $Seconds % 60
+    return ('{0:00}:{1:00}' -f $m, $s)
+}
+
+# 放一串烟花（粒子）：在宠物头顶炸开
+function Start-Firework {
+    if (-not $script:SceneMode) { return }
+    try {
+        $pos = Get-PetPos
+        $originX = $pos.Left + ($script:PetWidth / 2)
+        $originY = $pos.Top + 60
+        $palette = @(
+            [System.Windows.Media.Color]::FromArgb(255, 255, 209, 102),
+            [System.Windows.Media.Color]::FromArgb(255, 255, 107, 107),
+            [System.Windows.Media.Color]::FromArgb(255, 120, 220, 255),
+            [System.Windows.Media.Color]::FromArgb(255, 176, 255, 158),
+            [System.Windows.Media.Color]::FromArgb(255, 255, 158, 240)
+        )
+        for ($i = 0; $i -lt 34; $i++) {
+            $angle = (Get-Random -Minimum 0 -Maximum 360) * [Math]::PI / 180
+            $speed = (Get-Random -Minimum 90 -Maximum 260) / 60.0
+            $dot = New-Object System.Windows.Shapes.Ellipse
+            $size = Get-Random -Minimum 3 -Maximum 7
+            $dot.Width = $size
+            $dot.Height = $size
+            $dot.Fill = New-Object System.Windows.Media.SolidColorBrush($palette[(Get-Random -Minimum 0 -Maximum $palette.Count)])
+            [void]$script:FxLayer.Children.Add($dot)
+            [System.Windows.Controls.Canvas]::SetLeft($dot, $originX)
+            [System.Windows.Controls.Canvas]::SetTop($dot, $originY)
+            [void]$script:Particles.Add(@{
+                Shape = $dot
+                X = [double]$originX
+                Y = [double]$originY
+                Vx = [Math]::Cos($angle) * $speed
+                Vy = [Math]::Sin($angle) * $speed - 1.2
+                Life = 0
+                MaxLife = Get-Random -Minimum 26 -Maximum 46
+            })
+        }
+        $script:FxTimer.Start()
+        Write-PetLog 'firework!'
+    } catch {
+        Write-PetLog ('firework failed: ' + $_.Exception.Message)
+    }
+}
+
+# 粒子物理：每 33ms 走一步，寿命到了就删
+function Step-Fx {
+    if ($script:Particles.Count -eq 0) { $script:FxTimer.Stop(); return }
+    $expired = New-Object System.Collections.ArrayList
+    foreach ($p in $script:Particles) {
+        $p.Life = $p.Life + 1
+        $p.Vy = $p.Vy + 0.16
+        $p.Vx = $p.Vx * 0.985
+        $p.X = $p.X + $p.Vx
+        $p.Y = $p.Y + $p.Vy
+        [System.Windows.Controls.Canvas]::SetLeft($p.Shape, $p.X)
+        [System.Windows.Controls.Canvas]::SetTop($p.Shape, $p.Y)
+        $p.Shape.Opacity = [Math]::Max(0, 1.0 - ($p.Life / $p.MaxLife))
+        if ($p.Life -ge $p.MaxLife) { [void]$expired.Add($p) }
+    }
+    foreach ($p in $expired) {
+        [void]$script:FxLayer.Children.Remove($p.Shape)
+        [void]$script:Particles.Remove($p)
+    }
+}
+
+# 弹幕池一行：按类型上色
+function Add-PoolRow($item, [int]$ageFromNewest, [int]$total) {
+    $kind = [string]$item.kind
+    $who = [string]$item.user
+    if ([string]::IsNullOrWhiteSpace($who)) { $who = '观众' }
+    $text = [string]$item.text
+    $row = New-Object System.Windows.Controls.TextBlock
+    $row.FontSize = $script:PoolFontSize
+    $row.LineHeight = [Math]::Round($script:PoolFontSize * 1.45)
+    $row.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    $row.Margin = [System.Windows.Thickness]::new(0, 0, 0, 6)
+    # 越旧越淡（最新的 1.0，最旧约 0.42）
+    $fade = 1.0 - (($ageFromNewest / [Math]::Max(1, $total)) * 0.58)
+    $row.Opacity = [Math]::Max(0.42, $fade)
+
+    $runWho = New-Object System.Windows.Documents.Run
+    $runSay = New-Object System.Windows.Documents.Run
+    switch ($kind) {
+        'gift' {
+            $runWho.Text = ('[礼物] ' + $who + ' ')
+            $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 255, 209, 102))
+            $runSay.Text = $text
+            $runSay.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 255, 230, 163))
+        }
+        'enter' {
+            $runWho.Text = ('[进场] ' + $who)
+            $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 159, 176, 196))
+            $runSay.Text = ''
+        }
+        'me' {
+            $runWho.Text = '[我] '
+            $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 157, 255, 208))
+            $runSay.Text = $text
+            $runSay.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 214, 255, 233))
+        }
+        default {
+            $runWho.Text = ($who + '：')
+            $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 127, 212, 255))
+            $runSay.Text = $text
+            $runSay.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 242, 247, 255))
+        }
+    }
+    [void]$row.Inlines.Add($runWho)
+    if (-not [string]::IsNullOrWhiteSpace($runSay.Text)) { [void]$row.Inlines.Add($runSay) }
+    [void]$script:PoolRows.Children.Add($row)
+}
+
+# 刷新左上弹幕池 / 右上点歌台 / 左下场次数据
 function Update-ScenePanels($state) {
     if (-not $script:SceneMode) { return }
 
-    $poolLines = New-Object System.Collections.Generic.List[string]
-    if ($state.PSObject.Properties.Name -contains 'pool') {
-        $items = @($state.pool)
-        $tail = if ($items.Count -gt 10) { $items[($items.Count - 10)..($items.Count - 1)] } else { $items }
-        foreach ($item in $tail) {
-            $who = [string]$item.user
-            if ([string]::IsNullOrWhiteSpace($who)) { $who = '观众' }
-            $text = [string]$item.text
-            switch ([string]$item.kind) {
-                'gift' { [void]$poolLines.Add(('[礼物] ' + $who + ' ' + $text)) }
-                'enter' { [void]$poolLines.Add(('[进场] ' + $who)) }
-                'me' { [void]$poolLines.Add(('[我] ' + $text)) }
-                default { [void]$poolLines.Add(($who + ': ' + $text)) }
+    # ---- 弹幕池 ----
+    $items = @()
+    if ($state.PSObject.Properties.Name -contains 'pool') { $items = @($state.pool) }
+    $tail = @()
+    if ($items.Count -gt 11) { $tail = $items[($items.Count - 11)..($items.Count - 1)] } else { $tail = $items }
+    $sig = (($tail | ForEach-Object { "$($_.kind)|$($_.user)|$($_.text)" }) -join '~')
+    if ($sig -ne $script:PoolSignature) {
+        $script:PoolSignature = $sig
+        $script:PoolRows.Children.Clear()
+        if ($tail.Count -eq 0) {
+            $empty = New-Object System.Windows.Controls.TextBlock
+            $empty.Text = '还没人说话…'
+            $empty.FontSize = $script:PoolFontSize
+            $empty.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(150, 234, 242, 255))
+            [void]$script:PoolRows.Children.Add($empty)
+        } else {
+            for ($i = 0; $i -lt $tail.Count; $i++) {
+                Add-PoolRow $tail[$i] ($tail.Count - 1 - $i) $tail.Count
             }
         }
     }
-    $poolTitle = '弹幕池'
-    if ($poolLines.Count -eq 0) { [void]$poolLines.Add('还没人说话…') }
-    $poolText = $poolTitle + [Environment]::NewLine + [Environment]::NewLine + [string]::Join([Environment]::NewLine, $poolLines)
-    if ($script:PoolText.Text -ne $poolText) { $script:PoolText.Text = $poolText }
+    # 有新的礼物就放烟花
+    foreach ($item in $tail) {
+        if ([string]$item.kind -eq 'gift') {
+            $at = [double]$item.at
+            if ($at -gt $script:LastGiftFxAt) {
+                $script:LastGiftFxAt = $at
+                Start-Firework
+            }
+        }
+    }
 
-    $songLines = New-Object System.Collections.Generic.List[string]
+    # ---- 点歌台 ----
     $songs = $null
-    if ($state.PSObject.Properties.Name -contains 'songs') { $songs = $state.songs }
+    if ($null -ne $state.live -and $null -ne $state.live.songs) { $songs = $state.live.songs }
+    elseif ($state.PSObject.Properties.Name -contains 'songs') { $songs = $state.songs }
+    $lines = New-Object System.Collections.Generic.List[string]
     $playing = $null -ne $songs -and $songs.playing -eq $true -and -not [string]::IsNullOrWhiteSpace([string]$songs.title)
+    $elapsed = 0
+    $duration = 0
     if ($playing) {
-        [void]$songLines.Add('正在放：')
-        [void]$songLines.Add([string]$songs.title)
+        $title = [string]$songs.title
+        if ($title.Length -gt 22) { $title = $title.Substring(0, 22) + '…' }
+        [void]$lines.Add($title)
         $artist = [string]$songs.artist
-        if (-not [string]::IsNullOrWhiteSpace($artist)) { [void]$songLines.Add($artist) }
+        if ([string]::IsNullOrWhiteSpace($artist)) { $artist = [string]$songs.user }
+        if (-not [string]::IsNullOrWhiteSpace($artist)) { [void]$lines.Add(('— ' + $artist)) }
+        $elapsed = [int]$songs.elapsed
+        $duration = [int]$songs.duration
     } else {
-        [void]$songLines.Add('喊首歌名，我就点上')
+        [void]$lines.Add('喊首歌名，我就点上')
     }
     if ($null -ne $songs -and $null -ne $songs.queue) {
         $queue = @($songs.queue)
         if ($queue.Count -gt 0) {
-            [void]$songLines.Add('')
-            [void]$songLines.Add('排队中：')
-            $max = [Math]::Min(5, $queue.Count)
+            [void]$lines.Add('')
+            [void]$lines.Add('排队中：')
+            $max = [Math]::Min(4, $queue.Count)
             for ($i = 0; $i -lt $max; $i++) {
-                $title = [string]$queue[$i].title
-                if ($title.Length -gt 14) { $title = $title.Substring(0, 14) + '…' }
-                [void]$songLines.Add(('{0}. {1}' -f ($i + 1), $title))
+                $qTitle = [string]$queue[$i].title
+                if ($qTitle.Length -gt 14) { $qTitle = $qTitle.Substring(0, 14) + '…' }
+                [void]$lines.Add(('{0}. {1}' -f ($i + 1), $qTitle))
             }
         }
     }
-    $songText = '点歌台' + [Environment]::NewLine + [Environment]::NewLine + [string]::Join([Environment]::NewLine, $songLines)
+    $songText = [string]::Join([Environment]::NewLine, $lines)
     if ($script:SongText.Text -ne $songText) { $script:SongText.Text = $songText }
+
+    # 进度条
+    $trackWidth = 320.0
+    if ($duration -gt 0) {
+        $ratio = [Math]::Max(0.0, [Math]::Min(1.0, $elapsed / [double]$duration))
+        $script:SongFill.Width = [Math]::Round($trackWidth * $ratio)
+        $script:SongClock.Text = ((Format-Clock $elapsed) + ' / ' + (Format-Clock $duration))
+    } else {
+        $script:SongFill.Width = 0
+        $script:SongClock.Text = ''
+    }
+
+    # ---- 本场数据 ----
+    $statsLines = New-Object System.Collections.Generic.List[string]
+    [void]$statsLines.Add('本场数据')
+    $live = $state.live
+    if ($null -ne $live) {
+        $startedRaw = $null
+        if ($null -ne $live.started_at) { $startedRaw = $live.started_at }
+        $uptimeLine = ''
+        try {
+            $startDt = [datetime]::MinValue
+            if ($startedRaw -is [string]) {
+                if ([string]$startedRaw -ne '') { $startDt = [datetime]::Parse([string]$startedRaw) }
+            } elseif ($null -ne $startedRaw) {
+                $num = [double]$startedRaw
+                if ($num -gt 100000000000) { $startDt = [datetime]::FromFileTime([int64]$num) }
+                elseif ($num -gt 0) { $startDt = (Get-Date '1970-01-01').ToLocalTime().AddSeconds($num) }
+            }
+            if ($startDt -ne [datetime]::MinValue) {
+                $span = (Get-Date) - $startDt
+                if ($span.TotalSeconds -gt 0 -and $span.TotalDays -lt 2) {
+                    $uptimeLine = ('开播  ' + [int][Math]::Floor($span.TotalMinutes) + ' 分钟')
+                }
+            }
+        } catch { $uptimeLine = '' }
+        if ($uptimeLine -ne '') { [void]$statsLines.Add($uptimeLine) }
+        $requests = 0
+        if ($null -ne $live.requests) { $requests = [int]$live.requests }
+        $giftCount = 0
+        if ($null -ne $live.gifts) { $giftCount = [int]$live.gifts }
+        $giftValue = 0.0
+        if ($null -ne $live.gift_value) { $giftValue = [double]$live.gift_value }
+        $queueLen = 0
+        if ($null -ne $songs -and $null -ne $songs.len) { $queueLen = [int]$songs.len }
+        [void]$statsLines.Add(('弹幕回复  ' + $requests))
+        [void]$statsLines.Add(('收到礼物  ' + $giftCount + ' 个 / ' + [Math]::Round($giftValue, 1) + ' 元'))
+        [void]$statsLines.Add(('排队歌曲  ' + $queueLen + ' 首'))
+    }
+    $statsText = [string]::Join([Environment]::NewLine, $statsLines)
+    if ($script:StatsText.Text -ne $statsText) { $script:StatsText.Text = $statsText }
 }
 
 function Apply-State($state) {
@@ -779,11 +1046,14 @@ function Apply-State($state) {
         $sc = $state.scene
         Set-SceneMode ([bool]$sc.enabled) ([string]$sc.imagePath)
         $poolFont = [double]$sc.poolFontSize
-        if ($poolFont -ge 10 -and $poolFont -le 60 -and [Math]::Abs($poolFont - $script:PoolText.FontSize) -gt 0.1) {
-            $script:PoolText.FontSize = $poolFont
-            $script:PoolText.LineHeight = [Math]::Round($poolFont * 1.5)
+        if ($poolFont -ge 10 -and $poolFont -le 60 -and [Math]::Abs($poolFont - $script:PoolFontSize) -gt 0.1) {
+            $script:PoolFontSize = $poolFont
+            $script:PoolTitle.FontSize = $poolFont
+            $script:PoolSignature = ''
             $script:SongText.FontSize = [Math]::Max(12, $poolFont - 2)
             $script:SongText.LineHeight = [Math]::Round([Math]::Max(12, $poolFont - 2) * 1.5)
+            $script:StatsText.FontSize = [Math]::Max(12, $poolFont - 4)
+            $script:StatsText.LineHeight = [Math]::Round([Math]::Max(12, $poolFont - 4) * 1.5)
         }
         $fontSize = [double]$sc.bubbleFontSize
         if ($fontSize -ge 10 -and $fontSize -le 60 -and [Math]::Abs($fontSize - $script:BubbleFontSize) -gt 0.1) {
@@ -868,6 +1138,7 @@ function Wander-Pause([int]$Ms = 2500) {
     $script:WanderMoving = $false
     $script:WanderTimer.Stop()
     $script:WanderDwellTimer.Stop()
+    $script:FxTimer.Stop()
     # 暂停结束后自动接着溜达，否则一次点击/一次回复就把溜达永久停掉
     $script:WanderDwellTimer.Interval = [TimeSpan]::FromMilliseconds($Ms + 200)
     $script:WanderDwellTimer.Start()
@@ -1153,6 +1424,7 @@ $script:Window.ContextMenu = $menu
 $script:Timer.Add_Tick({ Step-Frame })
 $script:SquashTimer.Interval = [TimeSpan]::FromMilliseconds(45)
 $script:SquashTimer.Add_Tick({ Step-Squash })
+$script:FxTimer.Add_Tick({ Step-Fx })
 $script:TopTimer.Interval = [TimeSpan]::FromMilliseconds(3000)
 $script:TopTimer.Add_Tick({ Reassert-Topmost })
 $script:HideTimer.Add_Tick({ $script:HideTimer.Stop(); $script:Bubble.Visibility = 'Collapsed' })
