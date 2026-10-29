@@ -50,6 +50,7 @@ const PET_CONFIG_KEYS = [
   'chatEnabled', 'autoStartPet', 'petSilent',
   'welcomeEnter', 'welcomeEnterGapSec', 'welcomeEnterPerHour', 'welcomeEnterUserGapSec',
   'thanksGift', 'giftThanksGapSec', 'giftThanksUserGapSec', 'songEmotion', 'queryEmotion', 'allowSkip', 'skipCooldownSec',
+  'thanksFollow', 'thanksLike', 'likeThanksGapSec', 'welcomeFast', 'welcomeLine', 'followLine', 'likeLine',
   'giftForcedEmotion', 'giftPoseSec',
 ]
 
@@ -147,6 +148,15 @@ const DEFAULTS = {
   thanksGift: true,
   giftThanksGapSec: 4,
   giftThanksUserGapSec: 20,
+  /** Fixed-line gratitude: instant, never waits for the model. */
+  thanksFollow: true,
+  thanksLike: true,
+  likeThanksGapSec: 15,
+  /** Greet newcomers with a fixed line instead of a full model turn. */
+  welcomeFast: true,
+  welcomeLine: '欢迎 {user} 来到直播间～',
+  followLine: '谢谢 {user} 关注，么么哒～',
+  likeLine: '谢谢 {names} 的点赞～',
   /** Emotion choreography: what the body does while it is doing something. */
   queryEmotion: 'coding',
   songEmotion: 'crying',
@@ -994,6 +1004,77 @@ export function apply(ctx) {
     Object.assign(state, update, { seq: state.seq + 1, at: Date.now() })
   }
 
+/* ------------------------------------------------------------------ 固定话术
+ * 点赞 / 关注 / 进房这类高频事件不该等模型：直接合成语音 + 气泡，串行执行，
+ * 不与正常回合抢麦。
+ */
+let fixedChain = Promise.resolve()
+function speakFixed(text, emotion) {
+  const line = String(text || '').trim().slice(0, 80)
+  if (line === '') return Promise.resolve()
+  const mood = EMOTIONS.includes(emotion) ? emotion : 'happy'
+  fixedChain = fixedChain.then(async () => {
+    try {
+      const speech = config.speak === false ? null : await synthesize(config, line)
+      bump({
+        status: 'speaking',
+        say: line,
+        emotion: mood,
+        actionName: '',
+        audioPath: speech ? speech.path : '',
+        audioDuration: speech ? speech.duration : 0,
+        lastError: '',
+        turns: state.turns + 1,
+      })
+      pushPool({ kind: 'me', user: config.petName || '大肥鲸', text: line })
+      log(`fixed line (${mood}): ${line}`)
+      lastActivity = Date.now()
+      const ms = speech && speech.duration ? Math.min(20000, speech.duration * 1000 + 600) : 1200
+      await sleep(ms)
+    } catch (error) {
+      log('fixed line failed: ' + (error && error.message ? error.message : error))
+    }
+  })
+  return fixedChain
+}
+
+/** 点赞合并：窗口内的点赞凑一句「谢谢 A、B、C 的点赞」 */
+const likeBuffer = []
+let likeTimer = null
+function addLikeThanks(name) {
+  if (name && likeBuffer.indexOf(name) < 0 && likeBuffer.length < 40) likeBuffer.push(name)
+  if (likeTimer) return
+  const gapMs = Math.max(5, Number(config.likeThanksGapSec) || 15) * 1000
+  likeTimer = setTimeout(() => {
+    likeTimer = null
+    const names = likeBuffer.splice(0, likeBuffer.length)
+    if (names.length === 0) return
+    const shown = names.slice(0, 3)
+    const tpl = String(config.likeLine || '谢谢 {names} 的点赞～')
+    let line = tpl.replace('{names}', shown.join('、'))
+    if (names.length > shown.length) line = line + `（共${names.length}位）`
+    void speakFixed(line, 'happy')
+  }, gapMs)
+}
+
+/** 进房合并：1.2 秒内的进场凑一句固定欢迎 */
+const fastEnters = []
+let fastEnterTimer = null
+function addFastEnter(name) {
+  if (name && fastEnters.indexOf(name) < 0 && fastEnters.length < 40) fastEnters.push(name)
+  if (fastEnterTimer) return
+  fastEnterTimer = setTimeout(() => {
+    fastEnterTimer = null
+    const names = fastEnters.splice(0, fastEnters.length)
+    if (names.length === 0) return
+    const shown = names.slice(0, 3)
+    const tpl = String(config.welcomeLine || '欢迎 {user} 来到直播间～')
+    let line = tpl.replace('{user}', shown.join('、'))
+    if (names.length > shown.length) line = line + `（共${names.length}位）`
+    void speakFixed(line, 'happy')
+  }, 1200)
+}
+
   const systemPrompt = [
     '你正在抖音直播间陪观众，用你自己的口吻（人设见系统提示）回下面这条弹幕。',
     '先自己判断这条弹幕想干什么：纯闲聊？在问你？想让你点歌？要你切歌？需要动手就调用对应工具，别靠字面匹配。',
@@ -1444,10 +1525,28 @@ export function apply(ctx) {
             const user = String(row.user || '')
             if (kind === 'enter') {
               pushPool({ kind: 'enter', user, text: '' })
-              // 合并欢迎：先进缓冲，2.5 秒内的进场凑一批一起打招呼
               if (config.welcomeEnter === true && welcomeUserAllowed(user)) {
-                addPendingEnter(shortName(user))
+                if (config.welcomeFast === true) {
+                  // 固定话术：1.2 秒合并一批，不等模型
+                  addFastEnter(shortName(user))
+                } else {
+                  // 合并欢迎：先进缓冲，2.5 秒内的进场凑一批一起打招呼
+                  addPendingEnter(shortName(user))
+                }
               }
+              continue
+            }
+            if (kind === 'follow') {
+              pushPool({ kind: 'follow', user, text: '' })
+              if (config.thanksFollow === true) {
+                const tpl = String(config.followLine || '谢谢 {user} 关注，么么哒～')
+                void speakFixed(tpl.replace('{user}', shortName(user) || user), 'happy')
+              }
+              continue
+            }
+            if (kind === 'like') {
+              pushPool({ kind: 'like', user, text: '' })
+              if (config.thanksLike === true) addLikeThanks(shortName(user) || user)
               continue
             }
             if (kind === 'gift') {

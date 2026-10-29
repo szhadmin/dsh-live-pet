@@ -349,9 +349,19 @@ def idle_hint() -> str:
     return "\n".join(lines)
 
 
+def _pet_takeover(cfg: dict | None = None) -> bool:
+    """方案A：对话/点歌/答谢交给直播宠物（插件），app.py 只记录事件 + 放歌。"""
+    try:
+        c = cfg if cfg is not None else config.load()
+        return bool((c.get("douyin") or {}).get("pet_takeover", False))
+    except Exception:
+        return False
+
 def idle_tick() -> None:
     """工作线程空闲时调用：判断要不要自己开口。"""
     global _idle_busy, _idle_last, _idle_said
+    if _pet_takeover(cfg):
+        return
     cfg = config.load()
     idle = cfg.get("idle") or {}
     if not idle.get("enable", True):
@@ -789,6 +799,8 @@ def handle_event(event: dict) -> None:
         add_event("enter", f"{user} 游进了直播间", user)
         with LOCK:
             STATE.update(username=user, comment="游进了直播间")
+            if _pet_takeover(cfg):
+                return
         if not notice_ok("enter", user):
             return
         result = brain.welcome_reply(user, "enter", cfg)
@@ -797,6 +809,8 @@ def handle_event(event: dict) -> None:
         add_event("like", f"{user} 点了个赞", user)
         with LOCK:
             STATE.update(username=user, comment="点了个赞")
+            if _pet_takeover(cfg):
+                return
         if not notice_ok("like", user):
             return
         result = brain.welcome_reply(user, "like", cfg)
@@ -832,6 +846,8 @@ def handle_event(event: dict) -> None:
             STATE.update(username=user, comment=f"送出 {total_text}")
         memory.upsert_user(user, gift_value)
         memory.add_turn(user, "user", f"[礼物] {total_text}")
+        if _pet_takeover(cfg):
+            return
 
         # 答谢语音做个轻节流：动作照放，话别连成机关枪
         if not gift_notice_ok(user, cfg):
@@ -843,8 +859,12 @@ def handle_event(event: dict) -> None:
     elif kind == "follow":
         memory.upsert_user(user)
         add_event("follow", f"{user} 关注了直播间", user)
+        if _pet_takeover(cfg):
+            return
         result = brain.welcome_reply(user, "follow", cfg)
     elif kind == "promo":
+        if _pet_takeover(cfg):
+            return
         # 定时口播：点赞 / 关注 / 小心心
         user = cfg["host"]["name"]
         with LOCK:
@@ -857,7 +877,7 @@ def handle_event(event: dict) -> None:
     else:
         if not text:
             return
-        if not allow_reply(user, cfg):
+        if (not _pet_takeover(cfg)) and (not allow_reply(user, cfg)):
             add_event("skip", f"{user}：{text}（触发限流，已跳过）", user)
             return
         memory.upsert_user(user)
@@ -865,6 +885,10 @@ def handle_event(event: dict) -> None:
         add_event("comment", f"{user}：{text}", user)
         with LOCK:
             STATE.update(username=user, comment=text, status="thinking", facts_used=[], new_facts=[])
+        if _pet_takeover(cfg):
+            with LOCK:
+                STATE["status"] = "idle"
+            return
         song_cmd = songs.parse_command(text) if cfg["songs"].get("enable", True) else None
         if song_cmd is not None:
             result, song_pending = song_request_reply(user, song_cmd, cfg)
