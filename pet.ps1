@@ -263,6 +263,13 @@ try {
 '@
     $script:Win32Ready = $true
 } catch { }
+# 任何没接住的异常都记下来，别让窗口默默消失
+$script:Window.Dispatcher.Add_UnhandledException({
+    param($sender, $eventArgs)
+    try { Write-PetLog ('UNHANDLED: ' + $eventArgs.Exception.GetType().Name + ': ' + $eventArgs.Exception.Message) } catch { }
+    $eventArgs.Handled = $true
+})
+
 $script:Window.Add_SourceInitialized({
     if (-not $script:Win32Ready) { return }
     try {
@@ -463,18 +470,10 @@ function Invoke-Squash {
 }
 
 function Reassert-Topmost {
-    if (-not $script:Win32Ready) { return }
+    # 只做一件事：如果被系统降级了就重新声明 Topmost。
+    # （不要在这里做 false/true 抖动，也不要 Win32 SetWindowPos——实测都会把窗口搞没）
     try {
-        $helper = New-Object System.Windows.Interop.WindowInteropHelper($script:Window)
-        if ($helper.Handle -eq [IntPtr]::Zero) { return }
-        if ($script:SceneMode) {
-            # 场景模式：顺手把窗口按回 (0,0) 全屏，别让系统把它挪到副屏去
-            $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-            [void][PetNative3.WindowApi]::SetWindowPos($helper.Handle, [IntPtr](-1), [int]$wa.Left, [int]$wa.Top, [int]$wa.Width, [int]$wa.Height, 0x0040)
-            return
-        }
-        # HWND_TOPMOST = -1, SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW
-        [void][PetNative3.WindowApi]::SetWindowPos($helper.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0001 -bor 0x0002 -bor 0x0040)
+        if ($script:Window.Topmost -ne $true) { $script:Window.Topmost = $true }
     } catch { }
 }
 
