@@ -360,9 +360,9 @@ def _pet_takeover(cfg: dict | None = None) -> bool:
 def idle_tick() -> None:
     """工作线程空闲时调用：判断要不要自己开口。"""
     global _idle_busy, _idle_last, _idle_said
+    cfg = config.load()
     if _pet_takeover(cfg):
         return
-    cfg = config.load()
     idle = cfg.get("idle") or {}
     if not idle.get("enable", True):
         return
