@@ -3146,6 +3146,18 @@ function addFastEnter(name) {
         return
       }
       /* ---- 形象包（换宠物长相） ------------------------------------------ */
+/** 设置页：插件版也有一份（和 exe 用同一个 settings.html + 同一套接口） */
+      if (pathname === '/dsh-live-pet/settings' || pathname === '/dsh-live-pet/settings/') {
+        try {
+          const html = readFileSync(join(PKG_DIR, 'app', 'settings.html'), 'utf8')
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(html)
+        } catch (error) {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end(`设置页读不到：${error && error.message ? error.message : error}`)
+        }
+        return
+      }
       if (pathname === '/dsh-live-pet/skins') {
         sendJson(res, { ok: true, builtin: FRAMES_DIR, active: skinRoot(), skins: listSkins() })
         return
@@ -3191,6 +3203,9 @@ function addFastEnter(name) {
   ctx.effect(() => {
     claimPoller()
     log(`dsh-live-pet activated (instance ${instanceId})`)
+    let settingsOrigin = ''
+    try { settingsOrigin = ctx.webServer.getOrigin() } catch { settingsOrigin = '' }
+    if (settingsOrigin) log(`settings page: ${settingsOrigin}/dsh-live-pet/settings`)
     if (config.manageLive === true) {
       log(`live service is managed by this bundle (port ${Number(config.livePort) || 8791}, base ${liveBaseDirPath()})`)
       if (config.autoStartLive === true) {
