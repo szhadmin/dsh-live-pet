@@ -118,14 +118,34 @@ powershell -ExecutionPolicy Bypass -File scripts\build-exe.ps1
 
 exe 自带：宠物窗口脚本、全部帧图、直播服务代码，以及一份**本地设置页**。
 
+### 怎么启动（启动不了怎么办）
+
+1. **双击 `dist\dsh-live-pet.exe`**（或者桌面上的「直播宠物」快捷方式、仓库根目录的 `启动宠物.cmd`）
+2. 第一次启动要 **5~15 秒**解包资源，期间屏幕没反应是正常的，别重复点
+3. 起来之后：桌面上出现宠物窗口，设置页自动打开；以后想看设置就开 **`http://127.0.0.1:8899/settings`**
+
+启动不了时按顺序试：
+
+| 现象 | 怎么办 |
+| --- | --- |
+| 双击完全没反应 / 窗口一闪就没 | 双击 **`诊断启动.cmd`**：它会在窗口里直接跑，报错留在屏幕上不闪退；把那段字发出来就能定位 |
+| 弹出「Windows 已保护你的电脑」 | 点「更多信息」→「仍要运行」（exe 没签名，属于正常提示） |
+| 弹出「启动失败：…」的对话框 | 对话框里写了原因和日志路径；最常见是杀软拦截 / 程序已在跑 / 端口被占 |
+| 提示端口被占 | 改 `config.json` 里的 `appPort`（默认 8899），或先结束已在跑的 `dsh-live-pet.exe` |
+| 想彻底重来 | 删掉数据目录再启动：`%LOCALAPPDATA%\dsh-live-pet`（资源会重新解包） |
+
+> 数据目录：默认 `%LOCALAPPDATA%\dsh-live-pet`；如果这个目录写不进去（权限/杀软），会自动退到
+> `%TEMP%\dsh-live-pet`，再不行退到 exe 同目录的 `dsh-live-pet-data`——启动后第一行日志会写明用的是哪个。
+> 也可以用环境变量 `DSH_LIVE_PET_DATA` 自己指定。
+
 | 行为 | 说明 |
 | --- | --- |
 | 双击 exe | 起本地服务（默认 `127.0.0.1:8899`）+ 宠物窗口；直播服务按配置托管在 `8791` |
 | 再点一次 exe | 发现已在运行 → 只弹出设置页，不会开第二只宠物 |
 | 首次运行 | 资源解到 `%LOCALAPPDATA%\dsh-live-pet\app`，并自动打开设置页 |
-| 设置页 | 宠物 / 互动 / 模型 / 直播背景 / 动作 / 双智能体 / 直播服务 / 路径 / 其它 |
+| 设置页 | 宠物 / 互动 / 模型 / 直播背景 / 形象 / 动作 / 双智能体 / 用量 / 直播服务 / 路径 / 其它 |
 | 配置位置 | `%LOCALAPPDATA%\dsh-live-pet\app\config.json`（字段与插件版一致，可以互拷） |
-| 日志 | `%LOCALAPPDATA%\dsh-live-pet\app.log`、`…\app\live-pet.log`、`…\app\pet-window.log` |
+| 日志 | `%LOCALAPPDATA%\dsh-live-pet\app.log`、`…\app\live-pet.log`、`…\app\pet-window-a.log` / `-b.log`（写不进 AppData 时在 `%TEMP%\dsh-live-pet-logs\app.log`） |
 | 退出 | 宠物右键菜单里的「退出」，或任务管理器结束 `dsh-live-pet.exe` |
 
 exe 版和插件版**共用同一套代码**（`index.js` + `pet.ps1`），区别只是宿主：

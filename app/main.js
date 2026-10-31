@@ -15,7 +15,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /* 打包时由 esbuild --define 注入 */
 const IS_SEA = typeof __IS_SEA__ === 'boolean' ? __IS_SEA__ : false
@@ -24,16 +24,49 @@ const ASSET_LAYOUT = '2026-10-31a'
 /** 应用版本：解包后从 resources/package.json 读，读不到就是 dev */
 let APP_VERSION = 'dev'
 
-const APP_HOME = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'dsh-live-pet')
+/**
+ * 数据目录：默认 %LOCALAPPDATA%\dsh-live-pet。
+ * 有些机器上（杀软拦截、受控文件夹访问、非管理员账户）这里写不进去，
+ * 那就按顺序退到 %TEMP%\dsh-live-pet、exe 同目录 dsh-live-pet-data，保证双击一定能起来。
+ * 也可以用环境变量 DSH_LIVE_PET_DATA 自己指定。
+ */
+function pickAppHome() {
+  const candidates = []
+  const fromEnv = String(process.env.DSH_LIVE_PET_DATA || '').trim()
+  if (fromEnv !== '') candidates.push(fromEnv)
+  candidates.push(join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'dsh-live-pet'))
+  candidates.push(join(process.env.TEMP || process.env.TMP || homedir(), 'dsh-live-pet'))
+  try { candidates.push(join(dirname(process.execPath), 'dsh-live-pet-data')) } catch { /* 拿不到 exe 路径就算了 */ }
+  for (const dir of candidates) {
+    try {
+      mkdirSync(dir, { recursive: true })
+      const probe = join(dir, '.write-test')
+      writeFileSync(probe, 'ok')
+      rmSync(probe, { force: true })
+      return dir
+    } catch { /* 试下一个 */ }
+  }
+  return candidates[candidates.length - 1]
+}
+
+const APP_HOME = pickAppHome()
 const RUNTIME_DIR = join(APP_HOME, 'app')
 const LOG_FILE = join(APP_HOME, 'app.log')
+/** %LOCALAPPDATA% 写不进去时（权限 / 杀软占用）日志退到这里，方便排查 */
+const FALLBACK_LOG_DIR = join(process.env.TEMP || process.env.TMP || homedir(), 'dsh-live-pet-logs')
+const FALLBACK_LOG = join(FALLBACK_LOG_DIR, 'app.log')
 
 function log(message) {
   const line = `${new Date().toISOString().slice(11, 19)} ${message}`
   try {
     mkdirSync(APP_HOME, { recursive: true })
     writeFileSync(LOG_FILE, `${line}\n`, { flag: 'a' })
-  } catch { /* 日志写不了也要继续跑 */ }
+  } catch {
+    try {
+      mkdirSync(FALLBACK_LOG_DIR, { recursive: true })
+      writeFileSync(FALLBACK_LOG, `${line}\n`, { flag: 'a' })
+    } catch { /* 日志写不了也要继续跑 */ }
+  }
   process.stdout.write(`${line}\n`)
 }
 
@@ -79,9 +112,24 @@ async function ensureAssets() {
     return devHome
   }
   log(`解包内嵌资源 -> ${RUNTIME_DIR} (${(embedded.length / 1024 / 1024).toFixed(1)}MB)`)
-  const zipFile = join(APP_HOME, 'assets.zip')
+  let zipFile = join(APP_HOME, 'assets.zip')
   mkdirSync(APP_HOME, { recursive: true })
-  writeFileSync(zipFile, embedded)
+  // 杀软实时扫描 / 目录被占用时 writeFileSync 偶尔报 EPERM：重试几次，还不行就写到 %TEMP%
+  let wrote = false
+  for (let attempt = 0; attempt < 4 && !wrote; attempt += 1) {
+    try {
+      writeFileSync(zipFile, embedded)
+      wrote = true
+    } catch (error) {
+      log(`写资源包失败（第 ${attempt + 1} 次）：${error && error.code ? error.code : error}`)
+      if (attempt === 2) {
+        zipFile = join(process.env.TEMP || process.env.TMP || homedir(), 'dsh-live-pet-assets.zip')
+        log(`改写到 ${zipFile}`)
+      }
+      spawnSync('cmd', ['/c', 'ping', '-n', '2', '127.0.0.1'], { windowsHide: true })
+    }
+  }
+  if (!wrote) throw new Error(`资源包写不进去：${zipFile}`)
   if (!unzip(zipFile, RUNTIME_DIR)) {
     throw new Error(`解包失败：${zipFile}`)
   }
@@ -287,7 +335,29 @@ async function main() {
   log(`宠物窗口/直播服务状态见 ${join(assetDir, 'live-pet.log')}`)
 }
 
+/** 双击启动时控制台立刻关掉：把失败原因弹出来，别让用户一脸茫然 */
+function showFatal(error) {
+  const message = error && error.message ? error.message : String(error)
+  const hint = [
+    `启动失败：${message}`,
+    '',
+    `日志：${LOG_FILE}`,
+    `（若该目录写不进去，日志在 ${FALLBACK_LOG}）`,
+    '',
+    '常见原因：杀毒软件拦截、%LOCALAPPDATA% 没写权限、端口被占用。',
+    '可以先删掉下面这个目录再试：' + APP_HOME,
+  ].join(String.fromCharCode(13, 10))
+  try {
+    const escaped = hint.replace(/'/g, "''")
+    spawnSync('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command',
+      `Add-Type -AssemblyName System.Windows.Forms | Out-Null; [System.Windows.Forms.MessageBox]::Show('${escaped}', 'dsh-live-pet 启动失败') | Out-Null`,
+    ], { windowsHide: true })
+  } catch { /* 弹不出来就靠日志 */ }
+}
+
 main().catch((error) => {
   log(`启动失败：${error && error.stack ? error.stack : error}`)
   process.exitCode = 1
+  showFatal(error)
 })
