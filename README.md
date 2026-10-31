@@ -15,6 +15,9 @@
 - **背景三态**：全屏背景 / 最小化（只留宠物）/ 关闭，右键菜单和设置页都能一键切
 - **右键动作菜单**：13 个内置动作（敬礼/贴沙发/蹦一下/放烟花…）+ 自己写的自定义动作，点了当场演
 - **双智能体连麦**：主宠物和另一个 AI 在直播间抬杠（也可切成搭子闲聊），观众弹幕随时能插话
+- **桌面上两只宠物**：连麦时 A / B 各有自己的窗口，各说各的，气泡不打架
+- **形象可换**：把 GIF 丢进一个文件夹，就是另一套宠物（缺哪个情绪自动回退内置）
+- **token 用量统计**：设置页看累计消耗、A/B 各多少轮，可清零
 - **只读查看 DSH**：能看 DSH 有几个 profile、多少条会话、最近聊了啥（只读，不改不跑命令）
 - 在 **DSH → 设置 → 直播宠物** 里统一配置
 - 也可以打成一个 **exe 双击就跑**，设置页跟着 exe 走（见「方式 C」）
@@ -159,6 +162,61 @@ exe 版和插件版**共用同一套代码**（`index.js` + `pet.ps1`），区�
 | `wander` | `true` | 自动溜达：让它在桌面上自己走动 |
 | `wanderSpeed` | `55` | 走路速度（像素/秒），35 慢悠悠 / 80 有点赶 |
 | `wanderDwellMinSec` / `wanderDwellMaxSec` | `6` / `18` | 到地方后停留多久（这个区间里随机） |
+| `skinDir` | 空 | **形象包目录**：放 `<情绪>.gif` 或 `<情绪>/*.png`，留空用自带形象（见「换形象」） |
+| `multiAgent.showPetB` | `true` | 桌面上再放一只 B（连麦搭子）自己的窗口 |
+
+### 配置文件到底在哪
+
+三种装法各有一个 `config.json`，改哪个就影响哪个：
+
+| 装法 | 路径 | 备注 |
+| --- | --- | --- |
+| DSH 插件 | `%USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-live-pet\config.json` | 设置页改的就是它；`profiles\desktop` 换成你实际启用的 profile |
+| 独立 exe | `%LOCALAPPDATA%\dsh-live-pet\app\config.json` | exe 解压出来的 app 目录里；exe 的日志在同目录 `app.log` / `live-pet.log` / `pet-window-*.log` |
+| 直播服务本体 | `<liveBaseDir>\settings.json`（默认插件目录下 `live-data\settings.json`） | 弹幕连接、歌单、语音这些是直播服务的配置，设置页会转写 |
+
+不用记路径：设置页 **「路径」** 页直接显示当前生效的 `config.json` 完整路径和各个目录，还有「打开」按钮。
+
+## 换形象（宠物长相 / 动图配成可替换的）
+
+形象包就是一个文件夹，里面按**情绪名**放动图：
+
+```
+skins\小海豚\
+  happy.gif        开心
+  mischievous.gif  坏笑
+  crying.gif       哭
+  unhappy.gif      不高兴
+  eating.gif       吃东西
+  cooking.gif      做饭
+  coding.gif       敲电脑
+  tv.gif           躺沙发看电视
+  walking.gif      走路
+```
+
+- 设置页 **「形象」** 页：`建一个形象文件夹` → 弹出目录 → 把 GIF 丢进去 → `刷新列表` → `用这个形象`（宠物窗口会重启一次，2 秒）
+- 支持**透明背景 GIF**（每帧时长按 GIF 自己写的走）或 **PNG 序列**（建 `happy\` 文件夹放 `001.png`… 再放 `meta.json` 写每帧毫秒）
+- **只放一两个也能用**：缺哪个情绪自动回退到插件自带的帧；非正方形图按比例摆，不会拉变形
+- 想一次性备多套就建多个文件夹，随时互相切；`恢复内置形象` 一键回滚
+- 配置文件里对应 `skinDir`（填绝对路径）；exe 版同样有效（`%LOCALAPPDATA%\dsh-live-pet\app\skins\`）
+
+## 两只宠物（连麦搭子 B）
+
+「双智能体」打开后，桌面上可以**左右各一只**：A 是主宠物（大肥鲸），B 是搭子（名字可在设置里改）。
+
+- 两个窗口**各说各的**：`/state?slot=a` 和 `/state?slot=b` 分开给状态，气泡不会互相覆盖
+- B 的窗口不画全屏直播背景、不放弹幕池/歌单板（那是 A 的舞台），只当一只会说话的宠物，默认站屏幕左侧
+- 位置分别记在 `pet-window-a.json` / `pet-window-b.json`
+- 不想桌面上两只，就关掉「桌面上再放一只小宠物」（`multiAgent.showPetB=false`）：B 还在说话，只是台词显示在 A 的气泡里
+- OBS 里再补一路「窗口采集」选 B 的窗口就行
+
+## Token 用量
+
+- 每轮从 DSH 的 `--json` 输出里取 `usage`（input / output / cache 读），累加进 `usage.json`，**重启插件不清零**
+- 设置页 **「用量」** 页看总量、A/B 各自回合数、平均每轮、最后一轮明细，可一键清零重新统计
+- 顶栏一直显示累计 token
+- 命令行看：`curl http://127.0.0.1:62209/dsh-live-pet/usage`（`?reset=1` 清零）
+
 
 ## 直播场景（背景图 + 弹幕池 + 点歌台）
 
@@ -216,6 +274,7 @@ pet.ps1                       WPF 宠物窗口（透明置顶、动图、气泡�
 profile/pet-tools.js          宠物 profile 自带的只读工具（系统状态/读文件/搜索/点歌）
 profile/cordis.patch.tpl.yml  宠物 profile 模板（关掉写工具、禁用子智能体/工作流等）
 frames/<情绪>/NNN.png         240×240 动图帧（9 种情绪，共 546 张，已压到约 7MB）
+skins/<名字>/<情绪>.gif       用户自己的形象包（留空目录也行，缺的情绪回退 frames）
 live/                         内置的直播服务（app.py + core + vendor + web + defaults + requirements.txt）
 locale/                       设置页文案（中/英）
 app/main.js                   独立 exe 的宿主：最小 ctx 垫片 + 本地 HTTP + 打开设置窗口
@@ -235,6 +294,10 @@ cordis.patch.yml              bundle patch
 | `GET|POST /dsh-live-pet/live` | 托管直播服务的状态 / 启动 / 停止 / 重启 |
 | `GET /dsh-live-pet/poses` | 动作库（内置 13 个 + 自定义），右键菜单和设置页都用它 |
 | `POST|GET /dsh-live-pet/pose?id=` | 触发一个动作（表情 + 特效，到点自动还原） |
+| `GET /dsh-live-pet/state?slot=a|b` | 按窗口分别取状态（A / B 各一条，气泡不互相盖） |
+| `GET /dsh-live-pet/usage` | token 用量（`?reset=1` 清零） |
+| `GET /dsh-live-pet/skins` | 已安装的形象包 + 每个包认得出的情绪 |
+| `POST /dsh-live-pet/skins/create`、`/skins/open` | 建形象文件夹 / 用资源管理器打开形象目录 |
 | `GET /health` | 仅独立 exe：版本 / 资源目录 / 实例地址 |
 | `GET /dsh-live-pet/log`、`POST /reset`、`GET /selftest`、`GET /idle`、`GET /action` | 诊断与手动触发 |
 

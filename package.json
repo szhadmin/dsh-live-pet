@@ -1,6 +1,6 @@
 {
     "name": "dsh-live-pet",
-    "version":  "1.3.0",
+    "version":  "1.4.0",
     "private": true,
     "description": "抖音直播弹幕 → DSH 会话 → 桌面宠物：小鲸鱼在桌面上冒出弹幕回复、换情绪动图并用 Edge-TTS 说话，可在 DSH 设置里配置。",
     "type": "module",

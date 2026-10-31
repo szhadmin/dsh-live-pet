@@ -200,6 +200,11 @@ window.__ModuleLoader__.load({
       const [depsBusy, setDepsBusy] = React.useState(false)
       const [poses, setPoses] = React.useState([])
       const [posesText, setPosesText] = React.useState('[]')
+      const [skins, setSkins] = React.useState([])
+      const [skinsBusy, setSkinsBusy] = React.useState(false)
+      const [usage, setUsage] = React.useState(null)
+      /** 配置文件的真实路径（「配置在哪」那张卡片上显示） */
+      const [configFile, setConfigFile] = React.useState('')
 
       async function load() {
         try {
@@ -217,7 +222,10 @@ window.__ModuleLoader__.load({
             : '{}')
           const custom = payload.pet && Array.isArray(payload.pet.posesCustom) ? payload.pet.posesCustom : []
           setPosesText(JSON.stringify(custom, null, 2))
+          setConfigFile(typeof payload.configFile === 'string' ? payload.configFile : '')
           void refreshPoses()
+          void refreshSkins()
+          void refreshUsage()
         } catch (error) {
           setMessage({ kind: 'err', text: '读取配置失败：' + (error && error.message ? error.message : error) })
         }
@@ -242,6 +250,75 @@ window.__ModuleLoader__.load({
           setPoses(Array.isArray(payload.poses) ? payload.poses : [])
         } catch {
           setPoses([])
+        }
+      }
+
+      /* ---- 形象包：换宠物长相 ---- */
+      async function refreshSkins() {
+        try {
+          const response = await fetch('/dsh-live-pet/skins', { headers: { accept: 'application/json' } })
+          const payload = await response.json()
+          setSkins(Array.isArray(payload.skins) ? payload.skins : [])
+        } catch {
+          setSkins([])
+        }
+      }
+
+      async function createSkin() {
+        const name = window.prompt('形象叫什么？（会建一个文件夹，比如 小海豚）', '我的形象')
+        if (!name) return
+        setSkinsBusy(true)
+        try {
+          const response = await fetch('/dsh-live-pet/skins/create', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name }),
+          })
+          const payload = await response.json()
+          if (payload.ok === true) {
+            setMessage({ kind: 'ok', text: `已建好：${payload.dir}　把 happy.gif 之类的动图放进去，再点「刷新形象列表」` })
+            await refreshSkins()
+            await openSkinFolder(payload.dir)
+          } else {
+            setMessage({ kind: 'err', text: payload.error || '创建失败' })
+          }
+        } catch (error) {
+          setMessage({ kind: 'err', text: '创建失败：' + (error && error.message ? error.message : error) })
+        } finally {
+          setSkinsBusy(false)
+        }
+      }
+
+      async function openSkinFolder(dir) {
+        try {
+          await fetch('/dsh-live-pet/skins/open', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ dir: dir || '' }),
+          })
+        } catch (error) {
+          setMessage({ kind: 'err', text: '打不开目录：' + (error && error.message ? error.message : error) })
+        }
+      }
+
+      /* ---- token 用量 ---- */
+      async function refreshUsage() {
+        try {
+          const response = await fetch('/dsh-live-pet/usage', { headers: { accept: 'application/json' } })
+          const payload = await response.json()
+          setUsage(payload.usage || null)
+        } catch {
+          setUsage(null)
+        }
+      }
+
+      async function resetUsage() {
+        try {
+          await fetch('/dsh-live-pet/usage?reset=1', { headers: { accept: 'application/json' } })
+          await refreshUsage()
+          setMessage({ kind: 'ok', text: '用量统计已清零（只清统计，不影响宠物）' })
+        } catch (error) {
+          setMessage({ kind: 'err', text: '清零失败：' + (error && error.message ? error.message : error) })
         }
       }
 
@@ -309,20 +386,24 @@ window.__ModuleLoader__.load({
         return { ...draft, multiAgent: { ...current, [key]: value } }
       })
 
-      async function savePet() {
+      async function savePet(override, okText) {
+        // override 用来做「一键应用」（比如切形象）；直接当 onClick 用时传进来的是事件对象
+        const extra = override && typeof override === 'object'
+          && !('nativeEvent' in override) && !('target' in override) ? override : null
+        const patch = extra ? { ...petDraft, ...extra } : petDraft
         setBusy(true)
         setMessage({ kind: '', text: '' })
         try {
           const response = await fetch('/dsh-live-pet/config', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ pet: petDraft }),
+            body: JSON.stringify({ pet: patch }),
           })
           const payload = await response.json()
           if (payload.ok === true && payload.petSaved === true) {
             setPet(payload.pet || {})
             setPetDraft({})
-            setMessage({ kind: 'ok', text: '宠物设置已保存并立即生效' })
+            setMessage({ kind: 'ok', text: okText || '宠物设置已保存并立即生效' })
           } else {
             setMessage({ kind: 'err', text: payload.error || '保存失败' })
           }
@@ -837,7 +918,8 @@ window.__ModuleLoader__.load({
         },
           h(Row, { label: '开关' },
             h(Check, { label: '让它俩互相说话', value: teamValue('enabled') === true, onChange: (v) => setTeamValue('enabled', v) }),
-            h(Check, { label: '观众弹幕能插话', value: teamValue('audienceJoin') !== false, onChange: (v) => setTeamValue('audienceJoin', v) })),
+            h(Check, { label: '观众弹幕能插话', value: teamValue('audienceJoin') !== false, onChange: (v) => setTeamValue('audienceJoin', v) }),
+            h(Check, { label: '桌面上再放一只（B 自己一个窗口）', value: teamValue('showPetB') !== false, onChange: (v) => setTeamValue('showPetB', v) })),
           h(Row, { label: '关系' },
             h(Select, {
               value: teamValue('mode') || 'argue',
@@ -873,9 +955,70 @@ window.__ModuleLoader__.load({
           h('div', { style: styles.row },
             h('button', { style: styles.buttonPrimary, disabled: busy, onClick: savePet }, '保存双智能体设置'))),
 
+        h(Card, {
+          title: '形象（换成自己的动图）',
+          hint: '形象包就是一个文件夹：里面按情绪名放 GIF（happy.gif / crying.gif …），缺哪个情绪自动用自带那套。切形象后宠物窗口会重启一次。',
+        },
+          h(Row, { label: '当前形象' },
+            h('span', { style: styles.hint }, petValue('skinDir') ? String(petValue('skinDir')) : '内置（大肥鲸）'),
+            h('button', { style: styles.button, onClick: () => savePet({ skinDir: '' }, '已恢复内置形象（窗口会重启一次）') }, '用内置'),
+            h('button', { style: styles.button, disabled: skinsBusy, onClick: () => refreshSkins() }, '刷新形象列表'),
+            h('button', { style: styles.button, disabled: skinsBusy, onClick: () => createSkin() }, '建一个形象文件夹'),
+            h('button', { style: styles.button, disabled: skinsBusy, onClick: () => openSkinFolder('') }, '打开形象目录')),
+          skins.length === 0
+            ? h('div', { style: styles.hint }, '（还没有自己的形象包。点「建一个形象文件夹」，把 GIF 丢进去再回来选）')
+            : null,
+          skins.map((skin) => h(Row, { key: skin.dir, label: skin.name },
+            h('span', { style: styles.hint }, `${skin.count}/9 情绪 · ${Object.keys(skin.emotions || {}).join(' ') || '没认出 GIF'}`),
+            skin.active === true
+              ? h('span', { style: styles.ok }, '正在用')
+              : h('button', {
+                style: styles.buttonPrimary,
+                disabled: busy,
+                onClick: () => savePet({ skinDir: skin.dir }, `形象已切到「${skin.name}」（窗口会重启一次）`),
+              }, '用这个形象'),
+            h('button', { style: styles.button, onClick: () => openSkinFolder(skin.dir) }, '打开'))),
+          h('div', { style: styles.hint },
+            '情绪文件名固定这 9 个：happy、mischievous、crying、unhappy、eating、cooking、coding、tv、walking。'
+            + '支持透明背景 GIF（每帧时长按 GIF 自己写的走），也可以放 PNG 序列：happy\\001.png、002.png …')),
+
+        h(Card, {
+          title: 'Token 用量',
+          hint: '每轮从 DSH 的 --json 输出里取 usage 累加（输入 / 输出 / 缓存读），重启插件接着记。',
+        },
+          h(Row, { label: '累计' },
+            h('span', { style: styles.ok }, usage ? `${usage.total || 0} token · ${usage.turns || 0} 轮` : '（还没读到）'),
+            h('span', { style: styles.hint }, usage
+              ? `输入 ${usage.input || 0} / 输出 ${usage.output || 0} / 缓存读 ${usage.cacheRead || 0}`
+              : ''),
+            h('button', { style: styles.button, onClick: () => refreshUsage() }, '刷新'),
+            h('button', { style: styles.button, onClick: () => resetUsage() }, '清零重新统计')),
+          h(Row, { label: '分工' },
+            h('span', { style: styles.hint }, usage
+              ? `主宠物 A ${usage.turnsA || 0} 轮 · 搭子 B ${usage.turnsB || 0} 轮 · 平均每轮 ${usage.avgPerTurn || 0} token`
+              : ''),
+            h('span', { style: styles.hint }, usage && usage.last
+              ? `最后一轮：${usage.last.slot === 'b' ? 'B' : 'A'} 输入 ${usage.last.input} / 输出 ${usage.last.output}`
+              : ''))),
+
+        h(Card, {
+          title: '配置存在哪',
+          hint: '改哪个文件就影响哪个装法；设置页保存时改的就是下面这个。',
+        },
+          h(Row, { label: '本插件 config.json' },
+            h('span', { style: styles.hint }, configFile || '（读取中…）'),
+            h('button', { style: styles.button, onClick: () => load() }, '重新读取')),
+          h(Row, { label: '直播服务 settings.json' },
+            h('span', { style: styles.hint }, (liveState && liveState.baseDir)
+              ? `${liveState.baseDir}\\settings.json`
+              : '（托管启动后显示；默认在插件目录的 live-data 下）')),
+          h('div', { style: styles.hint },
+            '独立 exe 版：%LOCALAPPDATA%\\dsh-live-pet\\app\\config.json（同目录里有 app.log / live-pet.log / pet-window-*.log）。'
+            + '宠物窗口的位置记在 pet-window-a.json / pet-window-b.json，token 用量记在 usage.json。')),
+
         h('div', { style: styles.hint },
           '提示：改完「直播服务」里的开关后，直播服务会把它写进自己的 settings.json；' +
-          '插件的开关写在 F:\\douyinlive\\dsh-live-pet\\config.json。'))
+          '插件的开关写在 ' + (configFile || '本插件的 config.json') + '。'))
     }
 
     const inject = ['slots']

@@ -9,19 +9,26 @@
       · 按下有挤压回弹反馈
 
     环境变量：
-      PET_STATE_URL  状态地址，默认 http://127.0.0.1:64420/dsh-live-pet/state
-      PET_FRAMES     帧目录（含 meta.json），默认为本脚本同级的 frames
-      PET_SILENT     1 = 静音启动
+      PET_STATE_URL         状态地址（双智能体时带 ?slot=a|b），默认 http://127.0.0.1:64420/dsh-live-pet/state
+      PET_FRAMES            形象目录：<情绪>.gif 或 <情绪>/*.png，默认为本脚本同级的 frames
+      PET_FALLBACK_FRAMES   形象缺某个情绪时回退到这（默认也是 frames）
+      PET_SLOT              a = 主宠物，b = 连麦搭子（两只宠物就是两个窗口）
+      PET_LOG               窗口日志文件名，默认 pet-window.log
+      PET_SILENT            1 = 静音启动
 #>
 $ErrorActionPreference = 'Stop'
 
 $script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$script:Slot = if ($env:PET_SLOT -eq 'b') { 'b' } else { 'a' }
+$script:IsSlotB = ($script:Slot -eq 'b')
 $script:FramesRoot = if ($env:PET_FRAMES) { $env:PET_FRAMES } else { Join-Path $script:Root 'frames' }
+$script:FramesFallback = if ($env:PET_FALLBACK_FRAMES) { $env:PET_FALLBACK_FRAMES } else { Join-Path $script:Root 'frames' }
 $script:StateUrl = if ($env:PET_STATE_URL) { $env:PET_STATE_URL } else { 'http://127.0.0.1:64420/dsh-live-pet/state' }
-$script:ChatUrl = $script:StateUrl -replace '/state$', '/chat'
+# 地址里可能带 ?slot=b，替换时要把查询串一起吃掉
+$script:ChatUrl = $script:StateUrl -replace '/state(\?.*)?$', '/chat'
 # 插件的其它接口都挂在这个前缀下（/poses、/pose、/config）
-$script:HostBase = $script:StateUrl -replace '/state$', ''
-$script:LogFile = Join-Path $script:Root 'pet-window.log'
+$script:HostBase = $script:StateUrl -replace '/state(\?.*)?$', ''
+$script:LogFile = if ($env:PET_LOG) { Join-Path $script:Root $env:PET_LOG } else { Join-Path $script:Root 'pet-window.log' }
 $script:FrameSize = 240
 $script:ScaleSteps = @(0.6, 0.85, 1.1, 1.35)
 $script:Scale = 0.75
@@ -36,37 +43,129 @@ function Write-PetLog([string]$Message) {
 }
 
 # 只允许一个宠物窗口
-$script:Mutex = New-Object System.Threading.Mutex($false, 'Global\dsh-live-pet-window')
+$script:MutexName = 'Global\dsh-live-pet-window-' + $script:Slot
+$script:Mutex = New-Object System.Threading.Mutex($false, $script:MutexName)
 try {
     if (-not $script:Mutex.WaitOne(0)) { return }
 } catch { }
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
-if (-not (Test-Path (Join-Path $script:FramesRoot 'meta.json'))) {
-    Write-PetLog ('frames missing: ' + $script:FramesRoot)
-    return
+$script:MetaCache = @{}
+function Get-FramesMeta([string]$Root) {
+    if ($script:MetaCache.ContainsKey($Root)) { return $script:MetaCache[$Root] }
+    $result = $null
+    $file = Join-Path $Root 'meta.json'
+    if (Test-Path $file) {
+        try { $result = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $result = $null }
+    }
+    $script:MetaCache[$Root] = $result
+    return $result
 }
-$meta = Get-Content (Join-Path $script:FramesRoot 'meta.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+
+function ConvertTo-Bitmap([string]$Path) {
+    $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+    $bitmap.BeginInit()
+    $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bitmap.CreateOptions = [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat
+    $bitmap.UriSource = New-Object System.Uri($Path)
+    $bitmap.EndInit()
+    $bitmap.Freeze()
+    return $bitmap
+}
+
+# PNG 序列：<root>/<情绪>/*.png
+function Load-PngState([string]$Root, [string]$StateName) {
+    $dir = Join-Path $Root $StateName
+    if (-not (Test-Path $dir)) { return $null }
+    $files = @(Get-ChildItem -Path $dir -Filter '*.png' | Sort-Object Name)
+    if ($files.Count -eq 0) { return $null }
+    $frames = New-Object System.Collections.ArrayList
+    foreach ($file in $files) {
+        try { [void]$frames.Add((ConvertTo-Bitmap $file.FullName)) } catch { }
+    }
+    if ($frames.Count -eq 0) { return $null }
+    $durations = @()
+    $meta = Get-FramesMeta $Root
+    if ($null -ne $meta) {
+        foreach ($value in $meta.($StateName).durations) { $durations += [int]$value }
+    }
+    if ($durations.Count -eq 0) {
+        for ($i = 0; $i -lt $frames.Count; $i++) { $durations += 90 }
+    }
+    return @{ Frames = $frames.ToArray(); Durations = $durations }
+}
+
+# 从 GIF 字节里读每帧延时（GCE 块 21 F9 04，单位 1/100 秒）
+function Get-GifDelays([string]$Path) {
+    $delays = New-Object System.Collections.ArrayList
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        $i = 0
+        while ($i -lt $bytes.Length - 6) {
+            if ($bytes[$i] -eq 0x21 -and $bytes[$i + 1] -eq 0xF9 -and $bytes[$i + 2] -eq 0x04) {
+                $centis = [int]$bytes[$i + 4] + ([int]$bytes[$i + 5] * 256)
+                if ($centis -le 0) { $centis = 10 }
+                [void]$delays.Add([int]($centis * 10))
+                $i += 8
+                continue
+            }
+            $i += 1
+        }
+    } catch {
+        Write-PetLog ('gif delay parse failed: ' + $_.Exception.Message)
+    }
+    return $delays.ToArray()
+}
+
+# GIF：<root>/<情绪>.gif（或 <root>/gif/<情绪>.gif），每帧时长取 GIF 自己的
+function Load-GifState([string]$Root, [string]$StateName) {
+    $candidates = @((Join-Path $Root ($StateName + '.gif')), (Join-Path $Root ('gif\' + $StateName + '.gif')))
+    foreach ($path in $candidates) {
+        if (-not (Test-Path $path)) { continue }
+        try {
+            $uri = New-Object System.Uri($path)
+            $stream = [System.IO.File]::OpenRead($path)
+            $decoder = New-Object System.Windows.Media.Imaging.GifBitmapDecoder($stream, [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat, [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+            $frames = New-Object System.Collections.ArrayList
+            $durations = @()
+            foreach ($frame in $decoder.Frames) {
+                $frame.Freeze()
+                [void]$frames.Add($frame)
+                $durations += [int]90
+            }
+            $stream.Close()
+            if ($frames.Count -gt 0) {
+                # 先按 GIF 自己写的延时走，skin 目录里的 meta.json 若给了就覆盖
+                $real = Get-GifDelays $path
+                if ($real.Count -gt 0) { $durations = $real }
+                $metaRoot = Get-FramesMeta $Root
+                $override = @()
+                if ($null -ne $metaRoot) {
+                    foreach ($value in $metaRoot.($StateName).durations) { $override += [int]$value }
+                }
+                if ($override.Count -eq $frames.Count) { $durations = $override }
+                while ($durations.Count -lt $frames.Count) { $durations += 90 }
+                return @{ Frames = $frames.ToArray(); Durations = $durations }
+            }
+        } catch {
+            Write-PetLog ('gif load failed: ' + $path + ' ' + $_.Exception.Message)
+        }
+    }
+    return $null
+}
+
 $script:States = @{}
 
 function Load-State([string]$StateName) {
-    $dir = Join-Path $script:FramesRoot $StateName
-    if (-not (Test-Path $dir)) { return $null }
-    $frames = New-Object System.Collections.ArrayList
-    foreach ($file in (Get-ChildItem -Path $dir -Filter '*.png' | Sort-Object Name)) {
-        $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
-        $bitmap.BeginInit()
-        $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-        $bitmap.CreateOptions = [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat
-        $bitmap.UriSource = New-Object System.Uri($file.FullName)
-        $bitmap.EndInit()
-        $bitmap.Freeze()
-        [void]$frames.Add($bitmap)
+    # 先看配置的形象（GIF 优先，再 PNG 序列），都没有就回退内置 frames
+    $loaded = Load-GifState $script:FramesRoot $StateName
+    if ($null -eq $loaded) { $loaded = Load-PngState $script:FramesRoot $StateName }
+    if ($null -eq $loaded -and $script:FramesFallback -ne $script:FramesRoot) {
+        $loaded = Load-GifState $script:FramesFallback $StateName
+        if ($null -eq $loaded) { $loaded = Load-PngState $script:FramesFallback $StateName }
     }
-    $durations = @()
-    foreach ($value in $meta.($StateName).durations) { $durations += [int]$value }
-    return @{ Frames = $frames.ToArray(); Durations = $durations }
+    return $loaded
 }
 
 $script:Emotions = @('happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cooking', 'coding', 'tv', 'walking')
@@ -74,6 +173,7 @@ foreach ($stateName in $script:Emotions) {
     $loaded = Load-State $stateName
     if ($null -ne $loaded) { $script:States[$stateName] = $loaded }
 }
+Write-PetLog ('frames loaded: {0} emotions from {1}' -f $script:States.Count, $script:FramesRoot)
 if ($script:States.Count -eq 0) { Write-PetLog 'no frames loaded'; return }
 
 # ---------------------------------------------------------------- 窗口控件
@@ -354,7 +454,7 @@ $script:Window.Add_SourceInitialized({
     } catch { }
 })
 
-$script:PositionFile = Join-Path $script:Root 'pet-window.json'
+$script:PositionFile = Join-Path $script:Root ('pet-window-' + $script:Slot + '.json')
 
 # 读宠物当前位置（场景模式是窗口内坐标，普通模式是屏幕坐标）
 function Get-PetPos {
@@ -435,8 +535,14 @@ function Clamp-ToScreen {
 function Restore-Position {
     param([switch]$IgnoreSaved)
     $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $script:Window.Left = $workArea.Right - $script:Window.Width - 30
-    $script:Window.Top = $workArea.Bottom - $script:Window.Height - 40
+    if ($script:IsSlotB) {
+        # 搭子默认站左边，跟主宠物错开
+        $script:Window.Left = 60
+        $script:Window.Top = $workArea.Bottom - $script:Window.Height - 40
+    } else {
+        $script:Window.Left = $workArea.Right - $script:Window.Width - 30
+        $script:Window.Top = $workArea.Bottom - $script:Window.Height - 40
+    }
     if ((-not $IgnoreSaved) -and (Test-Path $script:PositionFile)) {
         try {
             $saved = Get-Content $script:PositionFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -453,13 +559,33 @@ function Restore-Position {
     Clamp-ToScreen
 }
 
+# 形象包的图不一定是正方形：按第一帧比例摆，别拉变形
+function Update-ImageSize {
+    $pixels = [int][Math]::Round($script:FrameSize * $script:Scale)
+    $width = $pixels
+    $height = $pixels
+    if ($script:CurrentState -ne '' -and $script:States.ContainsKey($script:CurrentState)) {
+        $data = $script:States[$script:CurrentState]
+        if ($null -ne $data -and $data.Frames.Count -gt 0) {
+            $frame = $data.Frames[0]
+            $w = [double]$frame.PixelWidth
+            $h = [double]$frame.PixelHeight
+            if ($w -gt 0 -and $h -gt 0 -and [Math]::Abs($w - $h) -gt 1) {
+                if ($w -gt $h) { $height = [int][Math]::Round($pixels * $h / $w) }
+                else { $width = [int][Math]::Round($pixels * $w / $h) }
+            }
+        }
+    }
+    $script:Image.Width = $width
+    $script:Image.Height = $height
+}
+
 function Apply-Size([double]$NewScale, [switch]$KeepAnchor) {
     $oldWidth = $script:Window.Width
     $oldHeight = $script:Window.Height
     $script:Scale = [Math]::Max(0.4, [Math]::Min(2.0, $NewScale))
     $pixels = [int][Math]::Round($script:FrameSize * $script:Scale)
-    $script:Image.Width = $pixels
-    $script:Image.Height = $pixels
+    Update-ImageSize
     if ($script:BoardEnabled -and $script:BoardVisible) { $script:Board.Visibility = 'Visible' } else { $script:Board.Visibility = 'Collapsed' }
     $prevExtra = 0
     if ($script:BoardExtra) { $prevExtra = $script:BoardExtra }
@@ -506,6 +632,7 @@ function Set-PetState([string]$StateName) {
     $script:FrameIndex = 0
     $data = $script:States[$StateName]
     $script:Image.Source = $data.Frames[0]
+    Update-ImageSize
     $script:Timer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max($data.Durations[0], 20))
     $script:Timer.Start()
 }
@@ -1337,8 +1464,10 @@ function Update-ScenePanels($state) {
 }
 
 function Apply-State($state) {
-    Update-Board 
-    Sync-Music $state
+    if (-not $script:IsSlotB) {
+        Update-Board
+        Sync-Music $state
+    }
     if ($null -eq $state) {
         Set-PetState 'crying'
         return
@@ -1362,7 +1491,9 @@ function Apply-State($state) {
     }
 
     # 直播场景：开关、背景图、字号（每轮都读，改设置立刻生效）
-    if ($state.PSObject.Properties.Name -contains 'scene') {
+    # B 是搭子，不画全屏背景也不放弹幕池，只当一只会说话的宠物
+    if ($script:IsSlotB) { Set-SceneMode $false '' }
+    if ((-not $script:IsSlotB) -and ($state.PSObject.Properties.Name -contains 'scene')) {
         $sc = $state.scene
         # display: full = 全屏背景；minimal = 背景收起来只留宠物；off = 没开背景
         $display = ''
@@ -1394,7 +1525,7 @@ function Apply-State($state) {
             Write-PetLog ('bubble font -> ' + $fontSize)
         }
     }
-    Update-ScenePanels $state
+    if (-not $script:IsSlotB) { Update-ScenePanels $state }
 
     $emotion = [string]$state.emotion
     if ($script:Emotions -notcontains $emotion) { $emotion = 'walking' }
@@ -1816,7 +1947,7 @@ $resetItem = New-Object System.Windows.Controls.MenuItem
 $resetItem.Header = '重开 DSH 会话'
 $resetItem.Add_Click({
     try {
-        $url = $script:StateUrl -replace '/state$', '/reset'
+        $url = $script:StateUrl -replace '/state(\?.*)?$', '/reset'
         [void](Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5)
     } catch { Write-PetLog ('reset failed: ' + $_.Exception.Message) }
 })
@@ -1858,7 +1989,7 @@ Set-PetState 'walking'
 $script:Poll.Start()
 $script:TopTimer.Start()
 Wander-ScheduleNext
-Write-PetLog ('window started at scale {0}, state url = {1}' -f $script:Scale, $script:StateUrl)
+Write-PetLog ('window started (slot {0}) at scale {1}, state url = {2}, frames = {3}' -f $script:Slot, $script:Scale, $script:StateUrl, $script:FramesRoot)
 
 try {
     [void]$script:Window.ShowDialog()

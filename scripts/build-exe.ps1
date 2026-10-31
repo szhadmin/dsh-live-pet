@@ -48,8 +48,18 @@ if (-not $SkipInstall) {
 
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
+# 0) 顺手清掉上层目录里 0 字节的 package.json：esbuild 一路往上找 package.json，
+#    碰到空的会直接报 Unexpected end of file in JSON，产物就停在上一次的旧 bundle 上
+$strayPkg = Join-Path (Split-Path -Parent $root) 'package.json'
+if ((Test-Path $strayPkg) -and ((Get-Item $strayPkg).Length -eq 0)) {
+    Write-Host ('   清掉空的上层 ' + $strayPkg + '（会挡住 esbuild）')
+    Remove-Item $strayPkg -Force
+}
+
 # 1) 打成单个 CJS 包
 $bundle = Join-Path $dist 'app.bundle.js'
+if (Test-Path $bundle) { Remove-Item $bundle -Force }
+$buildStart = Get-Date
 Write-Host '1/5 esbuild 打包 app/main.js…'
 Invoke-Native $node @(
     (Join-Path $root 'node_modules\esbuild\bin\esbuild'),
@@ -59,13 +69,14 @@ Invoke-Native $node @(
     '--define:__IS_SEA__=true'
 ) | Out-Null
 if (-not (Test-Path $bundle)) { throw 'esbuild 没有产出 bundle' }
+if ((Get-Item $bundle).LastWriteTime -lt $buildStart) { throw 'esbuild 打包失败（bundle 还是旧的）' }
 Write-Host ("    bundle {0:N1} KB" -f ((Get-Item $bundle).Length / 1KB))
 
 # 2) 资源打包成 zip（frames / bg / live / profile / pet.ps1 / app\settings.html …）
 $zip = Join-Path $dist 'assets.zip'
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Write-Host '2/5 打包资源 zip…'
-$items = @('pet.ps1', 'frames', 'bg', 'live', 'profile', 'scene', 'locale', 'app\settings.html', 'package.json', 'config.example.json', 'README.md') |
+$items = @('pet.ps1', 'frames', 'skins', 'bg', 'live', 'profile', 'scene', 'locale', 'app\settings.html', 'package.json', 'config.example.json', 'README.md') |
     Where-Object { Test-Path (Join-Path $root $_) }
 Push-Location $root
 try {

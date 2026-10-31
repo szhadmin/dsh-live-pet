@@ -59,6 +59,7 @@ const PET_CONFIG_KEYS = [
   'petName',
   'posesCustom',
   'multiAgent',
+  'skinDir',
   'mode', 'profile', 'manageProfile', 'appUrl', 'pollMs', 'replyKinds',
   // 独立 exe 里这些必须能在设置页改：模型/密钥/各种可执行文件与目录
   'provider', 'model', 'baseUrl', 'apiKey', 'apiKeyEnv',
@@ -92,6 +93,11 @@ const DEFAULTS = {
   sceneMinimized: false,
   /** 宠物自己的名字（气泡落款、弹幕池署名） */
   petName: '大肥鲸',
+  /**
+   * 形象包目录（里面按情绪分文件夹：happy/ mischievous/ …，每张 png 一帧）。
+   * 留空 = 用自带的 frames；填别的目录就换形象，宠物窗口会重启一次。
+   */
+  skinDir: '',
   /** 宠物对话气泡字号（直播要看得清） */
   bubbleFontSize: 20,
   /** 场景里弹幕池的字号 */
@@ -234,6 +240,8 @@ const DEFAULTS = {
     idleStartSec: 45,
     /** 观众弹幕可以插话（排队优先，默认开） */
     audienceJoin: true,
+    /** 桌面上一只 A + 一只 B；关掉就只留主宠物说话（B 的话会显示在 A 的气泡里） */
+    showPetB: true,
   },
 }
 
@@ -783,6 +791,8 @@ function parseTurnOutput(stdout) {
   let sessionId = ''
   let finalText = ''
   let errorText = ''
+  // 一轮里可能有多个 step，每个 step 都会报一次 usage，累加起来才是这轮的总账
+  const usage = { input: 0, output: 0, cacheRead: 0, total: 0, steps: 0 }
   for (const raw of String(stdout || '').split('\n')) {
     const line = raw.trim()
     if (line === '' || line[0] !== '{') continue
@@ -791,8 +801,15 @@ function parseTurnOutput(stdout) {
     if (event.type === 'session' && typeof event.sessionId === 'string') sessionId = event.sessionId
     if (event.type === 'final' && typeof event.text === 'string') finalText = event.text
     if (event.type === 'error' && typeof event.message === 'string') errorText = event.message
+    if (event.type === 'status' && event.usage && typeof event.usage === 'object') {
+      usage.input += Number(event.usage.inputTokens) || 0
+      usage.output += Number(event.usage.outputTokens) || 0
+      usage.cacheRead += Number(event.usage.cacheReadTokens) || 0
+      usage.total += Number(event.usage.totalTokens) || 0
+      usage.steps += 1
+    }
   }
-  return { sessionId, finalText, errorText }
+  return { sessionId, finalText, errorText, usage }
 }
 
 function parseAnswer(text, maxChars) {
@@ -857,7 +874,18 @@ export function apply(ctx) {
     speaker: '',
     live: {},
     pool: [],
+    /**
+     * 两只宠物各走一路状态：a = 主宠物，b = 连麦搭子。
+     * 每个窗口轮询 /state?slot=a|b 只取自己那一路，气泡不会互相覆盖。
+     */
+    slots: {
+      a: { seq: 0, say: '', emotion: 'walking', audioPath: '', audioDuration: 0, at: 0, status: 'idle' },
+      b: { seq: 0, say: '', emotion: 'walking', audioPath: '', audioDuration: 0, at: 0, status: 'idle' },
+    },
+    /** token 用量：本机累计，落盘在 usage.json */
+    usage: { turns: 0, turnsA: 0, turnsB: 0, input: 0, output: 0, cacheRead: 0, total: 0, lastAt: 0, last: null, since: Date.now() },
   }
+
 
   /* ---- managed live-service instance ---------------------------------- */
   /**
@@ -1065,6 +1093,8 @@ export function apply(ctx) {
   /** 同一批 feed 行只处理一次（并发/重复读取时兜底）。 */
   const seenFeedIds = new Set()
   let petChild = null
+  /** 连麦搭子（B）的窗口 */
+  let petBChild = null
   /* ---- 进场欢迎：合并成一批一起欢迎 ---------------------------------- */
   /** 还没欢迎的进场观众（同一人只记一次），等合并窗口结束后一起欢迎 */
   const pendingEnters = []
@@ -1125,8 +1155,157 @@ export function apply(ctx) {
   /** Last time the room said anything (or the pet spoke); drives idle chatter. */
   let lastActivity = Date.now()
   let idleTimer = null
+  /* ---- token 用量：每轮从 DSH 的 --json 输出里抠 usage，累加并落盘 ------ */
+
+  const USAGE_FILE = join(PKG_DIR, 'usage.json')
+  let usageSaveTimer = null
+
+  function loadUsage() {
+    try {
+      const saved = JSON.parse(readFileSync(USAGE_FILE, 'utf8').replace(/^\uFEFF/, ''))
+      if (!saved || typeof saved !== 'object') return
+      for (const key of ['turns', 'turnsA', 'turnsB', 'input', 'output', 'cacheRead', 'total']) {
+        const value = Number(saved[key])
+        if (Number.isFinite(value) && value >= 0) state.usage[key] = value
+      }
+      if (Number(saved.since) > 0) state.usage.since = Number(saved.since)
+      if (Number(saved.lastAt) > 0) state.usage.lastAt = Number(saved.lastAt)
+      if (saved.last && typeof saved.last === 'object') state.usage.last = saved.last
+    } catch {
+      // 第一次跑没有文件，正常
+    }
+  }
+
+  function saveUsageSoon() {
+    clearTimeout(usageSaveTimer)
+    usageSaveTimer = setTimeout(() => {
+      try {
+        writeFileSync(USAGE_FILE, JSON.stringify(state.usage, null, 2) + '\n', 'utf8')
+      } catch {
+        // 写不了就算了，内存里的还在
+      }
+    }, 1500)
+  }
+
+  // 上次跑剩下的用量接着记（重启插件不清零）
+  loadUsage()
+
+  /** 一轮结束后记账（usage 为空 = 这轮没拿到统计，忽略）。 */
+  function noteUsage(slot, usage) {
+    if (!usage) return
+    const input = Number(usage.input) || 0
+    const output = Number(usage.output) || 0
+    const cacheRead = Number(usage.cacheRead) || 0
+    const total = Number(usage.total) || 0
+    if (input === 0 && output === 0 && total === 0) return
+    const record = state.usage
+    record.turns += 1
+    if (slot === 'b') record.turnsB += 1
+    else record.turnsA += 1
+    record.input += input
+    record.output += output
+    record.cacheRead += cacheRead
+    record.total += total
+    record.lastAt = Date.now()
+    record.last = { slot: slot === 'b' ? 'b' : 'a', input, output, cacheRead, total, steps: Number(usage.steps) || 0, at: record.lastAt }
+    log(`usage +${total} tokens (in ${input} / out ${output} / cache ${cacheRead})，累计 ${record.total}`)
+    saveUsageSoon()
+  }
+
+  /** 给设置页看的用量（带一点人话字段）。 */
+  function usageReport() {
+    const usage = state.usage
+    const turns = usage.turns || 0
+    const minutes = Math.max(0.1, (Date.now() - (usage.since || Date.now())) / 60000)
+    return {
+      ...usage,
+      avgPerTurn: turns > 0 ? Math.round(usage.total / turns) : 0,
+      perMinute: Math.round(usage.total / minutes),
+      sinceText: new Date(usage.since || Date.now()).toISOString(),
+      lastAtText: usage.lastAt > 0 ? new Date(usage.lastAt).toISOString() : '',
+    }
+  }
+
+  /**
+   * /state 的载荷：按窗口（a / b）分别给。
+   * 每只宠物只念自己的台词，所以两个窗口的气泡不会互相盖。
+   */
+  function statePayloadFor(slot) {
+    const isB = slot === 'b'
+    const view = state.slots[isB ? 'b' : 'a']
+    const nameA = String(config.petName || '大肥鲸')
+    const nameB = multiAgentOn() ? agentFor('b').name : ''
+    const payload = {
+      ...state,
+      seq: view.seq,
+      say: view.say,
+      emotion: view.emotion,
+      status: view.status,
+      audioPath: view.audioPath,
+      audioDuration: view.audioDuration,
+      at: view.at || state.at,
+      speaker: '',
+      speaking: view.audioPath !== '' && Date.now() - view.at < Math.max(2000, Number(view.audioDuration) * 1000 + 1500),
+      // B 的窗口不画全屏直播背景，也不放弹幕池/歌单板（那是 A 的舞台）
+      scene: isB
+        ? {
+          enabled: false,
+          display: 'off',
+          minimized: false,
+          imagePath: '',
+          bubbleFontSize: Math.max(10, Math.min(60, Number(config.bubbleFontSize) || 20)),
+          poolFontSize: Math.max(10, Math.min(60, Number(config.poolFontSize) || 20)),
+          bounds: null,
+        }
+        : scenePayload(),
+      config: {
+        speak: config.speak,
+        petSilent: config.petSilent,
+        profile: isB ? (String(config.multiAgent.profileB || '') || config.profile) : config.profile,
+        appUrl: appBase(),
+        manageLive: config.manageLive === true,
+        livePort: config.livePort,
+        petName: isB ? (nameB || '搭子') : nameA,
+        slot: isB ? 'b' : 'a',
+        partnerName: isB ? nameA : nameB,
+        skinDir: skinRoot(),
+        multiAgent: multiAgentOn(),
+        agentB: nameB,
+      },
+      // 宠物窗口每轮都读这段：改了设置立刻生效，不用重开窗口
+      wander: {
+        enabled: config.wander !== false,
+        speed: Math.max(10, Math.min(400, Number(config.wanderSpeed) || 55)),
+        dwellMinSec: Math.max(1, Math.min(120, Number(config.wanderDwellMinSec) || 6)),
+        dwellMaxSec: Math.max(1, Math.min(300, Number(config.wanderDwellMaxSec) || 18)),
+      },
+    }
+    if (isB) {
+      payload.pose = null
+      payload.pool = []
+      payload.live = {}
+      payload.user = ''
+      payload.kind = ''
+      if (view.status === 'idle' && view.say === '') payload.emotion = view.emotion
+    }
+    return payload
+  }
+
   function bump(update) {
-    Object.assign(state, update, { seq: state.seq + 1, at: Date.now() })
+    const patch = update && typeof update === 'object' ? update : {}
+    const slot = patch.slot === 'b' ? 'b' : patch.slot === 'a' ? 'a' : ''
+    const rest = { ...patch }
+    delete rest.slot
+    Object.assign(state, rest, { seq: state.seq + 1, at: Date.now() })
+    if (slot !== '') {
+      // 镜像到对应窗口的那一路，各自 seq 独立自增，谁有新话谁的窗口动
+      const view = state.slots[slot]
+      view.seq += 1
+      view.at = state.at
+      for (const field of ['say', 'emotion', 'audioPath', 'audioDuration', 'status', 'pose']) {
+        if (field in rest) view[field] = rest[field]
+      }
+    }
   }
 
   /** 内置动作 + 用户自定义动作（config.posesCustom，设置页可加）。 */
@@ -1472,9 +1651,11 @@ function addFastEnter(name) {
       })
       state.session = out.sessionId
     }
-    return parseAnswer(out.finalText, Number(bullet.chat === true || bullet.idle === true
+    const parsed = parseAnswer(out.finalText, Number(bullet.chat === true || bullet.idle === true
       ? (config.chatMaxChars || 240)
       : (config.maxChars || 70)))
+    // token 用量跟着这一轮一起带回去（记账用）
+    return { ...parsed, usage: out.usage || null }
   }
 
   /** Let the pet skip the current song — rate-limited so one viewer cannot spam it. */
@@ -1594,7 +1775,7 @@ function addFastEnter(name) {
   async function handle(bullet, agent) {
     const me = agent || agentFor('a')
     lastActivity = Date.now()
-    bump({ status: 'thinking', user: me.slot === 'b' ? me.name : bullet.user, kind: bullet.kind, say: '', audioPath: '', audioDuration: 0, speaker: '' })
+    bump({ slot: me.slot, status: 'thinking', user: me.slot === 'b' ? me.name : bullet.user, kind: bullet.kind, say: '', audioPath: '', audioDuration: 0, speaker: '' })
     try {
       const answer = await runTurn(bullet, me)
       // Emotion choreography: the pet's body follows what it is doing, not just the words.
@@ -1622,8 +1803,10 @@ function addFastEnter(name) {
         if (EMOTIONS.includes(songEmotion)) emotion = songEmotion
       }
       // One bump per turn: the pet reacts to `seq` by replaying exactly once.
+      noteUsage(me.slot, answer.usage)
       const speech = await synthesize(config, answer.say)
       bump({
+        slot: me.slot,
         status: 'speaking',
         say: answer.say,
         emotion,
@@ -1784,7 +1967,7 @@ function addFastEnter(name) {
   }
 
   async function poll() {
-    enforceSinglePetWindow()
+    enforcePetWindows()
     if (!alive) return
     if (!ownsPoller()) {
       alive = false
@@ -2114,17 +2297,22 @@ function addFastEnter(name) {
     }
   }
 
-  /** 定时体检：桌面上只允许留一个宠物窗口，多出来的（旧脚本残留）清掉。 */
+  /**
+   * 定时体检：桌面上最多一个 A 窗口 + 一个 B 窗口，多出来的（旧脚本残留）清掉。
+   * 连麦关掉的时候只留一个。
+   */
   let lastPetCheckAt = 0
-  function enforceSinglePetWindow() {
+  function enforcePetWindows() {
     const now = Date.now()
     if (now - lastPetCheckAt < 20000) return
     lastPetCheckAt = now
     try {
       const escaped = PET_SCRIPT.replace(/'/g, "''")
+      const wantB = multiAgentOn() && config.multiAgent.showPetB !== false
+      const keep = wantB ? 2 : 1
       const script = "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\""
         + " | Where-Object { $_.CommandLine -like '*" + escaped + "*' -and $_.CommandLine -notlike '*Stop-Process*' -and $_.ProcessId -ne $PID }"
-        + " | Sort-Object CreationDate | Select-Object -Skip 1"
+        + " | Sort-Object CreationDate | Select-Object -Skip " + keep
         + " | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
       spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
         windowsHide: true,
@@ -2135,15 +2323,166 @@ function addFastEnter(name) {
     }
   }
 
-  function startPet() {
+  /** 形象包目录：配了 skinDir 且里面有能认出来的情绪就用它，否则用自带的 frames。 */
+  function skinRoot() {
+    const dir = String(config.skinDir || '').trim()
+    if (dir === '') return FRAMES_DIR
+    try {
+      if (!statSync(dir).isDirectory()) return FRAMES_DIR
+      if (Object.keys(scanSkinDir(dir)).length > 0) return dir
+    } catch {
+      // 目录不存在/没权限：退回自带形象
+    }
+    return FRAMES_DIR
+  }
+
+  /** 形象放这里：skins/<名字>/<情绪>.gif 或 skins/<名字>/<情绪>/*.png */
+  const SKINS_DIR = join(PKG_DIR, 'skins')
+
+  /** 扫一个目录里有哪些情绪可用（GIF 或 PNG 序列都算）。 */
+  function scanSkinDir(dir) {
+    const emotions = {}
+    for (const emotion of EMOTIONS) {
+      const gif = join(dir, `${emotion}.gif`)
+      if (existsSync(gif)) {
+        emotions[emotion] = { kind: 'gif', frames: 0, path: gif }
+        continue
+      }
+      const altGif = join(dir, 'gif', `${emotion}.gif`)
+      if (existsSync(altGif)) {
+        emotions[emotion] = { kind: 'gif', frames: 0, path: altGif }
+        continue
+      }
+      const framesDir = join(dir, emotion)
+      try {
+        if (statSync(framesDir).isDirectory()) {
+          const pngs = readdirSync(framesDir).filter((name) => /\.png$/i.test(name))
+          if (pngs.length > 0) emotions[emotion] = { kind: 'png', frames: pngs.length, path: framesDir }
+        }
+      } catch {
+        // 没有这个情绪的目录
+      }
+    }
+    return emotions
+  }
+
+  function listSkins() {
+    const out = []
+    const seen = new Set()
+    const push = (dir, name) => {
+      if (seen.has(dir)) return
+      seen.add(dir)
+      const emotions = scanSkinDir(dir)
+      out.push({ name, dir, emotions, count: Object.keys(emotions).length, active: dir === skinRoot() })
+    }
+    try {
+      for (const entry of readdirSync(SKINS_DIR)) {
+        const dir = join(SKINS_DIR, entry)
+        try {
+          if (statSync(dir).isDirectory()) push(dir, entry)
+        } catch { /* 忽略坏项 */ }
+      }
+    } catch {
+      // 还没建 skins 目录
+    }
+    const custom = String(config.skinDir || '').trim()
+    if (custom !== '' && existsSync(custom)) push(custom, '（自定义路径）')
+    return out
+  }
+
+  function createSkin(rawName) {
+    const name = String(rawName || '').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40)
+    if (name === '') return { ok: false, error: '给形象起个名字（比如 小海豚）' }
+    const dir = join(SKINS_DIR, name)
+    try {
+      mkdirSync(dir, { recursive: true })
+      const readme = join(dir, '怎么用.txt')
+      if (!existsSync(readme)) {
+        writeFileSync(readme, [
+          '把动图放进这个文件夹，文件名就是情绪名（程序按名字认）：',
+          '',
+          'happy.gif        开心',
+          'mischievous.gif  坏笑/调皮',
+          'crying.gif       哭',
+          'unhappy.gif      不高兴',
+          'eating.gif       吃东西',
+          'cooking.gif      做饭',
+          'coding.gif       敲电脑',
+          'tv.gif           躺沙发看电视',
+          'walking.gif      走路',
+          '',
+          '只要透明背景的 GIF（或 PNG），建议正方形 240×240 左右。',
+          '缺哪个情绪就会自动用插件自带的那套，所以先只放 happy.gif 也能跑。',
+          '放好之后回设置页点「扫描形象」→「用这个形象」。',
+          '',
+          '（也可以用 PNG 序列：建 happy/ 文件夹，里面 001.png 002.png …，再拖一个 meta.json 写每帧毫秒）',
+        ].join('\r\n'), 'utf8')
+      }
+      log(`skin created: ${dir}`)
+      return { ok: true, dir, name }
+    } catch (error) {
+      return { ok: false, error: String(error && error.message ? error.message : error) }
+    }
+  }
+
+  function openFolder(dir) {
+    const target = String(dir || '').trim() === '' ? skinRoot() : String(dir)
+    try {
+      if (!existsSync(target)) return { ok: false, error: `目录不存在：${target}` }
+      spawn('explorer.exe', [target], { detached: true, stdio: 'ignore', windowsHide: false }).unref()
+      log(`opened folder: ${target}`)
+      return { ok: true, dir: target }
+    } catch (error) {
+      return { ok: false, error: String(error && error.message ? error.message : error) }
+    }
+  }
+
+  function spawnPetWindow(slot, origin) {
+    const name = slot === 'b' ? 'b' : 'a'
+    const stateUrl = `${origin}/dsh-live-pet/state?slot=${name}`
+    const skin = skinRoot()
+    try {
+      const child = spawn('powershell.exe', [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', PET_SCRIPT,
+      ], {
+        cwd: PKG_DIR,
+        env: {
+          ...process.env,
+          PET_STATE_URL: stateUrl,
+          PET_FRAMES: skin,
+          PET_FALLBACK_FRAMES: FRAMES_DIR,
+          PET_SLOT: name,
+          PET_LOG: `pet-window-${name}.log`,
+          PET_SILENT: config.petSilent ? '1' : '0',
+          PET_LIVE_BASE: appBase(),
+        },
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: false,
+      })
+      if (name === 'b') petBChild = child
+      else petChild = child
+      child.on('exit', (code) => {
+        log(`pet window ${name} exited (${code})`)
+        if (name === 'b') petBChild = null
+        else petChild = null
+      })
+      child.on('error', (error) => log(`pet window ${name} failed: ${error && error.message ? error.message : error}`))
+      log(`pet window ${name} started (pid ${child.pid}) -> ${stateUrl}${skin !== FRAMES_DIR ? ` skin=${skin}` : ''}`)
+    } catch (error) {
+      log(`pet window ${name} spawn failed: ${error && error.message ? error.message : error}`)
+    }
+  }
+
+  /** 起宠物窗口：A 一定有，B 看连麦开关。 */
+  function startPetWindows(reason = '') {
     if (!existsSync(PET_SCRIPT)) {
       log(`pet script missing: ${PET_SCRIPT}`)
       return
     }
     let origin = ''
     try { origin = ctx.webServer.getOrigin() } catch { origin = '' }
-    const stateUrl = origin === '' ? '' : `${origin}/dsh-live-pet/state`
-    if (stateUrl === '') {
+    if (origin === '') {
       log('webServer origin unavailable; the pet window needs the /dsh-live-pet/state route')
       return
     }
@@ -2151,35 +2490,33 @@ function addFastEnter(name) {
     // 孤儿窗口还占着互斥量时新窗口会立刻退出，等一下再起
     setTimeout(() => {
       if (!alive) return
-      try {
-        petChild = spawn('powershell.exe', [
-          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', PET_SCRIPT,
-        ], {
-          cwd: PKG_DIR,
-          env: { ...process.env, PET_STATE_URL: stateUrl, PET_FRAMES: FRAMES_DIR, PET_SILENT: config.petSilent ? '1' : '0', PET_LIVE_BASE: appBase() },
-          stdio: 'ignore',
-          windowsHide: true,
-          detached: false,
-        })
-        petChild.on('exit', (code) => {
-          log(`pet window exited (${code})`)
-          petChild = null
-        })
-        petChild.on('error', (error) => log(`pet window failed: ${error && error.message ? error.message : error}`))
-        log(`pet window started (pid ${petChild.pid}) -> ${stateUrl}${killed ? ' (cleared stale windows first)' : ''}`)
-      } catch (error) {
-        log(`pet window spawn failed: ${error && error.message ? error.message : error}`)
+      spawnPetWindow('a', origin)
+      if (multiAgentOn() && config.multiAgent.showPetB !== false) {
+        // B 隔一拍起，避免两个窗口同时抢互斥量/同一个默认位置
+        setTimeout(() => { if (alive) spawnPetWindow('b', origin) }, 1100)
       }
+      if (reason !== '') log(`pet windows restarted (${reason})`)
     }, killed ? 1200 : 0)
   }
 
-  function stopPet() {
-    if (petChild && petChild.pid) {
+  function startPet() {
+    startPetWindows()
+  }
+
+  function stopPetWindow(slot) {
+    const child = slot === 'b' ? petBChild : petChild
+    if (child && child.pid) {
       try {
-        spawn('taskkill', ['/PID', String(petChild.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
       } catch { /* ignore */ }
-      petChild = null
     }
+    if (slot === 'b') petBChild = null
+    else petChild = null
+  }
+
+  function stopPet() {
+    stopPetWindow('a')
+    stopPetWindow('b')
   }
 
   /* ---- routes ---------------------------------------------------------- */
@@ -2355,7 +2692,7 @@ function addFastEnter(name) {
             if (Object.prototype.hasOwnProperty.call(body.pet, 'sceneMinimized')) {
               log('scene window: ' + (config.sceneMinimized === true ? 'minimized (只留宠物)' : 'full (全屏背景)') + ' / sceneEnabled=' + (config.sceneEnabled === true))
             }
-            // 双智能体开关/配置变了：立刻重排连麦节奏
+            // 双智能体开关/配置变了：立刻重排连麦节奏，并把 B 的窗口开起来/关掉
             if (Object.prototype.hasOwnProperty.call(body.pet, 'multiAgent') || Object.prototype.hasOwnProperty.call(body.pet, 'petName')) {
               banter.round = 0
               banter.quietUntil = 0
@@ -2363,6 +2700,12 @@ function addFastEnter(name) {
               banter.lastLine = ''
               scheduleBanter(2000)
               log('multi-agent settings updated: ' + (multiAgentOn() ? `on (A=${agentFor('a').name} / B=${agentFor('b').name})` : 'off'))
+              if (config.autoStartPet) startPetWindows('multi-agent settings changed')
+            }
+            // 换形象：宠物窗口启动时才读帧，必须重启窗口
+            if (Object.prototype.hasOwnProperty.call(body.pet, 'skinDir')) {
+              log('skin -> ' + (skinRoot() === FRAMES_DIR ? '内置形象' : skinRoot()))
+              if (config.autoStartPet) startPetWindows('skin changed')
             }
             if (Object.prototype.hasOwnProperty.call(body.pet, 'persona')) {
               const rebuilt = ensurePetProfile(config)
@@ -2424,30 +2767,19 @@ function addFastEnter(name) {
       }
 
       if (pathname === '/dsh-live-pet/state') {
-        sendJson(res, {
-          ...state,
-          speaking: state.audioPath !== '' && Date.now() - state.at < Math.max(2000, state.audioDuration * 1000 + 1500),
-          // 直播场景：背景图、字号、宠物可活动范围（屏幕坐标）
-          scene: scenePayload(),
-          config: {
-            speak: config.speak,
-            petSilent: config.petSilent,
-            profile: config.profile,
-            appUrl: appBase(),
-            manageLive: config.manageLive === true,
-            livePort: config.livePort,
-            petName: String(config.petName || '大肥鲸'),
-            multiAgent: multiAgentOn(),
-            agentB: multiAgentOn() ? agentFor('b').name : '',
-          },
-    // 宠物窗口每轮都读这段：改了设置立刻生效，不用重开窗口
-    wander: {
-      enabled: config.wander !== false,
-      speed: Math.max(10, Math.min(400, Number(config.wanderSpeed) || 55)),
-      dwellMinSec: Math.max(1, Math.min(120, Number(config.wanderDwellMinSec) || 6)),
-      dwellMaxSec: Math.max(1, Math.min(300, Number(config.wanderDwellMaxSec) || 18)),
-    },
-        })
+        const slot = String(searchParams.get('slot') || 'a').toLowerCase() === 'b' ? 'b' : 'a'
+        sendJson(res, statePayloadFor(slot))
+        return
+      }
+      /* ---- token 用量 ---------------------------------------------------- */
+      if (pathname === '/dsh-live-pet/usage') {
+        if (searchParams.get('reset') === '1') {
+          const since = Date.now()
+          state.usage = { turns: 0, turnsA: 0, turnsB: 0, input: 0, output: 0, cacheRead: 0, total: 0, lastAt: 0, last: null, since }
+          saveUsageSoon()
+          log('usage counters reset')
+        }
+        sendJson(res, { ok: true, usage: usageReport() })
         return
       }
       /* ---- 直播场景页 + 背景图 ------------------------------------------ */
@@ -2561,6 +2893,23 @@ function addFastEnter(name) {
         }
         const result = performPose(id)
         sendJson(res, result)
+        return
+      }
+      /* ---- 形象包（换宠物长相） ------------------------------------------ */
+      if (pathname === '/dsh-live-pet/skins') {
+        sendJson(res, { ok: true, builtin: FRAMES_DIR, active: skinRoot(), skins: listSkins() })
+        return
+      }
+      if (pathname === '/dsh-live-pet/skins/create' && req.method === 'POST') {
+        const body = await readJsonBody(req, 8192)
+        const result = createSkin(body && typeof body.name === 'string' ? body.name : '')
+        sendJson(res, result)
+        return
+      }
+      if (pathname === '/dsh-live-pet/skins/open' && req.method === 'POST') {
+        const body = await readJsonBody(req, 8192)
+        const dir = body && typeof body.dir === 'string' && body.dir !== '' ? body.dir : skinRoot()
+        sendJson(res, openFolder(dir))
         return
       }
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })

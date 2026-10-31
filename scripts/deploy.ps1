@@ -29,7 +29,7 @@ if (-not (Test-Path (Join-Path $Target 'package.json'))) {
 
 # 顶层：代码与静态资源
 $topFiles = @('index.js', 'client.js', 'pet.ps1', 'cordis.patch.yml', 'package.json', 'icon.svg', 'README.md', 'config.example.json', 'LICENSE')
-$topDirs  = @('scene', 'locale', 'frames', 'bg', 'live', 'profile', 'scripts')
+$topDirs  = @('scene', 'locale', 'frames', 'bg', 'live', 'profile', 'scripts', 'skins', 'app')
 
 function Should-Skip([string]$rel) {
     if ($rel -match '(^|\\)__pycache__(\\|$)') { return $true }
