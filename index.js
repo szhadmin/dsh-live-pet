@@ -1230,6 +1230,39 @@ export function apply(ctx) {
    * /state 的载荷：按窗口（a / b）分别给。
    * 每只宠物只念自己的台词，所以两个窗口的气泡不会互相盖。
    */
+  /** 场景里一起画的那只（连麦搭子 B）：A 的窗口按这段数据把 B 也画出来 */
+  function partnerPayload() {
+    if (!multiAgentOn()) return null
+    const view = state.slots && state.slots.b
+    if (!view) return null
+    return {
+      show: true,
+      name: agentFor('b').name,
+      seq: view.seq || 0,
+      say: view.say || '',
+      emotion: view.emotion || 'idle',
+      status: view.status || 'idle',
+      audioPath: view.audioPath || '',
+      audioDuration: Number(view.audioDuration) || 0,
+      at: view.at || 0,
+    }
+  }
+
+  /** 背景左下角「本场数据」里显示的 token 用量 */
+  function usagePayload() {
+    const usage = state.usage || {}
+    const report = usageReport()
+    return {
+      total: usage.total || 0,
+      turns: usage.turns || 0,
+      turnsA: usage.turnsA || 0,
+      turnsB: usage.turnsB || 0,
+      perMinute: report.perMinute || 0,
+      avgPerTurn: report.avgPerTurn || 0,
+      lastAt: usage.lastAt || 0,
+    }
+  }
+
   function statePayloadFor(slot) {
     const isB = slot === 'b'
     const view = state.slots[isB ? 'b' : 'a']
@@ -1279,6 +1312,11 @@ export function apply(ctx) {
         dwellMinSec: Math.max(1, Math.min(120, Number(config.wanderDwellMinSec) || 6)),
         dwellMaxSec: Math.max(1, Math.min(300, Number(config.wanderDwellMaxSec) || 18)),
       },
+    }
+    // A 的窗口负责把 B 也画进背景里，顺便显示 token 统计
+    if (!isB) {
+      payload.partner = partnerPayload()
+      payload.usage = usagePayload()
     }
     if (isB) {
       payload.pose = null
@@ -2208,6 +2246,11 @@ function addFastEnter(name) {
     }
   }
 
+  /** 当前场景形态：full（全屏背景）/ minimal（背景收起只留宠物）/ off（没开背景） */
+  function sceneDisplayNow() {
+    if (config.sceneEnabled !== true) return 'off'
+    return config.sceneMinimized === true ? 'minimal' : 'full'
+  }
   function edgePath() {
     const candidates = [
       'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -2308,7 +2351,7 @@ function addFastEnter(name) {
     lastPetCheckAt = now
     try {
       const escaped = PET_SCRIPT.replace(/'/g, "''")
-      const wantB = multiAgentOn() && config.multiAgent.showPetB !== false
+      const wantB = multiAgentOn() && config.multiAgent.showPetB !== false && sceneDisplayNow() !== 'full'
       const keep = wantB ? 2 : 1
       const script = "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\""
         + " | Where-Object { $_.CommandLine -like '*" + escaped + "*' -and $_.CommandLine -notlike '*Stop-Process*' -and $_.ProcessId -ne $PID }"
@@ -2491,7 +2534,9 @@ function addFastEnter(name) {
     setTimeout(() => {
       if (!alive) return
       spawnPetWindow('a', origin)
-      if (multiAgentOn() && config.multiAgent.showPetB !== false) {
+      // 开了全屏背景时，B 由 A 的窗口一起画（OBS 抓一个窗口就有两只），不再单独开窗口
+      const bOwnWindow = multiAgentOn() && config.multiAgent.showPetB !== false && sceneDisplayNow() !== 'full'
+      if (bOwnWindow) {
         // B 隔一拍起，避免两个窗口同时抢互斥量/同一个默认位置
         setTimeout(() => { if (alive) spawnPetWindow('b', origin) }, 1100)
       }
@@ -2706,6 +2751,12 @@ function addFastEnter(name) {
             if (Object.prototype.hasOwnProperty.call(body.pet, 'skinDir')) {
               log('skin -> ' + (skinRoot() === FRAMES_DIR ? '内置形象' : skinRoot()))
               if (config.autoStartPet) startPetWindows('skin changed')
+            }
+            // 背景开关/收起会决定「B 画在背景里」还是「B 自己开窗口」
+            if (Object.prototype.hasOwnProperty.call(body.pet, 'sceneEnabled')
+              || Object.prototype.hasOwnProperty.call(body.pet, 'sceneMinimized')) {
+              log('scene display -> ' + sceneDisplayNow())
+              if (config.autoStartPet) startPetWindows('scene display changed')
             }
             if (Object.prototype.hasOwnProperty.call(body.pet, 'persona')) {
               const rebuilt = ensurePetProfile(config)

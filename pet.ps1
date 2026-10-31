@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+﻿﻿﻿#Requires -Version 5.1
 <#
     小鲸鱼直播宠物 —— DSH 插件 dsh-live-pet 的"身体"。
 
@@ -385,6 +385,76 @@ $script:StatsText.TextWrapping = [System.Windows.TextWrapping]::Wrap
 $script:StatsPanel.Child = $script:StatsText
 
 # 烟花特效层：盖在最上面，不挡鼠标
+# ---------------------------------------------- 第二只宠物（连麦搭子 B）
+# 开了直播背景时 B 不再自己开窗口，而是由 A 的窗口一起画出来：
+# OBS 只抓一个窗口就能同时看到两只，B 也一定落在背景范围内。
+$script:PartnerWidth = 0.0
+$script:PartnerHeight = 0.0
+$script:PartnerVisible = $false
+$script:PartnerScale = 0.84
+$script:PartnerName = ''
+$script:PartnerSeq = -1
+$script:PartnerEmotion = ''
+$script:PartnerFrames = $null
+$script:PartnerDurations = $null
+$script:PartnerIndex = 0
+$script:PartnerX = 0.0
+$script:PartnerY = 0.0
+$script:PartnerTargetX = 0.0
+$script:LastUsageLine = ''
+
+$script:PartnerBubbleText = New-Object System.Windows.Controls.TextBlock
+$script:PartnerBubbleText.Foreground = [System.Windows.Media.Brushes]::White
+$script:PartnerBubbleText.FontSize = 18
+$script:PartnerBubbleText.LineHeight = 26
+$script:PartnerBubbleText.TextWrapping = 'Wrap'
+$script:PartnerBubbleText.TextAlignment = 'Center'
+
+$script:PartnerTag = New-Object System.Windows.Controls.TextBlock
+$script:PartnerTag.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(215, 168, 226, 255))
+$script:PartnerTag.FontSize = 14
+$script:PartnerTag.TextAlignment = 'Center'
+$script:PartnerTag.Margin = [System.Windows.Thickness]::new(0, 0, 0, 3)
+
+$script:PartnerTagHost = New-Object System.Windows.Controls.StackPanel
+[void]$script:PartnerTagHost.Children.Add($script:PartnerTag)
+[void]$script:PartnerTagHost.Children.Add($script:PartnerBubbleText)
+
+$script:PartnerBubble = New-Object System.Windows.Controls.Border
+$script:PartnerBubble.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(238, 18, 40, 58))
+$script:PartnerBubble.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(120, 120, 200, 240))
+$script:PartnerBubble.BorderThickness = [System.Windows.Thickness]::new(1)
+$script:PartnerBubble.CornerRadius = [System.Windows.CornerRadius]::new(12)
+$script:PartnerBubble.Padding = [System.Windows.Thickness]::new(12, 8, 12, 8)
+$script:PartnerBubble.HorizontalAlignment = 'Center'
+$script:PartnerBubble.VerticalAlignment = 'Bottom'
+$script:PartnerBubble.Visibility = 'Collapsed'
+$script:PartnerBubble.Child = $script:PartnerTagHost
+
+$script:PartnerImage = New-Object System.Windows.Controls.Image
+$script:PartnerImage.Stretch = [System.Windows.Media.Stretch]::Uniform
+$script:PartnerImage.IsHitTestVisible = $false
+[System.Windows.Media.RenderOptions]::SetBitmapScalingMode($script:PartnerImage, [System.Windows.Media.BitmapScalingMode]::HighQuality)
+$script:PartnerFlipTransform = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+$script:PartnerImage.RenderTransformOrigin = [System.Windows.Point]::new(0.5, 1.0)
+$script:PartnerImage.RenderTransform = $script:PartnerFlipTransform
+
+$script:PartnerGrid = New-Object System.Windows.Controls.Grid
+$pRowBubble = New-Object System.Windows.Controls.RowDefinition
+$pRowBubble.Height = New-Object System.Windows.GridLength([double]120)
+$pRowImage = New-Object System.Windows.Controls.RowDefinition
+$pRowImage.Height = New-Object System.Windows.GridLength(1.0, [System.Windows.GridUnitType]::Star)
+[void]$script:PartnerGrid.RowDefinitions.Add($pRowBubble)
+[void]$script:PartnerGrid.RowDefinitions.Add($pRowImage)
+[System.Windows.Controls.Grid]::SetRow($script:PartnerBubble, 0)
+[System.Windows.Controls.Grid]::SetRow($script:PartnerImage, 1)
+[void]$script:PartnerGrid.Children.Add($script:PartnerBubble)
+[void]$script:PartnerGrid.Children.Add($script:PartnerImage)
+$script:PartnerShell = $script:PartnerGrid
+$script:PartnerShell.HorizontalAlignment = 'Left'
+$script:PartnerShell.VerticalAlignment = 'Top'
+$script:PartnerShell.IsHitTestVisible = $false
+$script:PartnerShell.Visibility = 'Collapsed'
 $script:FxLayer = New-Object System.Windows.Controls.Canvas
 $script:FxLayer.IsHitTestVisible = $false
 $script:Particles = New-Object System.Collections.ArrayList
@@ -419,11 +489,13 @@ $root = New-Object System.Windows.Controls.Grid
 [void]$root.Children.Add($script:PoolPanel)
 [void]$root.Children.Add($script:SongPanel)
 [void]$root.Children.Add($script:StatsPanel)
+[void]$root.Children.Add($script:PartnerShell)
 [void]$root.Children.Add($shell)
 [void]$root.Children.Add($script:FxLayer)
 [System.Windows.Controls.Panel]::SetZIndex($script:PoolPanel, 1)
 [System.Windows.Controls.Panel]::SetZIndex($script:SongPanel, 1)
 [System.Windows.Controls.Panel]::SetZIndex($script:StatsPanel, 1)
+[System.Windows.Controls.Panel]::SetZIndex($script:PartnerShell, 2)
 [System.Windows.Controls.Panel]::SetZIndex($shell, 2)
 [System.Windows.Controls.Panel]::SetZIndex($script:FxLayer, 3)
 $script:Shell.HorizontalAlignment = 'Stretch'
@@ -618,6 +690,10 @@ $script:Timer = New-Object System.Windows.Threading.DispatcherTimer
 $script:Poll = New-Object System.Windows.Threading.DispatcherTimer
 $script:HideTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:SquashTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:PartnerTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:PartnerHideTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:PartnerWalkTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:PartnerPlayer = New-Object System.Windows.Media.MediaPlayer
 $script:TopTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:CurrentState = 'walking'
 $script:FrameIndex = 0
@@ -645,6 +721,158 @@ function Step-Frame {
     $script:Timer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max($data.Durations[$script:FrameIndex], 20))
 }
 
+# ------------------------------------------------------ 搭子 B 的画面
+function Set-PartnerPos([double]$Left, [double]$Top) {
+    $script:PartnerX = $Left
+    $script:PartnerY = $Top
+    $script:PartnerShell.Margin = New-Object System.Windows.Thickness($Left, $Top, 0, 0)
+}
+
+function Set-PartnerEmotion([string]$Name) {
+    if (-not $script:States.ContainsKey($Name)) { $Name = 'walking' }
+    if ($script:PartnerEmotion -eq $Name -and $null -ne $script:PartnerFrames) { return }
+    $script:PartnerEmotion = $Name
+    $data = $script:States[$Name]
+    $script:PartnerFrames = $data.Frames
+    $script:PartnerDurations = $data.Durations
+    $script:PartnerIndex = 0
+    $script:PartnerImage.Source = $script:PartnerFrames[0]
+    $script:PartnerTimer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max($script:PartnerDurations[0], 20))
+    $script:PartnerTimer.Start()
+}
+
+function Step-PartnerFrame {
+    if ($null -eq $script:PartnerFrames) { return }
+    if ($script:PartnerFrames.Count -le 1) { return }
+    $script:PartnerIndex = ($script:PartnerIndex + 1) % $script:PartnerFrames.Count
+    $script:PartnerImage.Source = $script:PartnerFrames[$script:PartnerIndex]
+    $script:PartnerTimer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max($script:PartnerDurations[$script:PartnerIndex], 20))
+}
+
+function Show-PartnerBubble([string]$Text, [int]$HoldMs) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return }
+    $script:PartnerBubbleText.Text = $Text
+    $script:PartnerBubble.Visibility = 'Visible'
+    $script:PartnerHideTimer.Stop()
+    $script:PartnerHideTimer.Interval = [TimeSpan]::FromMilliseconds($HoldMs)
+    $script:PartnerHideTimer.Start()
+}
+
+function Play-PartnerAudio([string]$Path) {
+    if ($script:Silent -or [string]::IsNullOrWhiteSpace($Path)) { return }
+    if (-not (Test-Path $Path)) { return }
+    try {
+        $script:PartnerPlayer.Volume = $script:VoiceVolume
+        $script:PartnerPlayer.Open((New-Object System.Uri($Path)))
+        $script:PartnerPlayer.Play()
+    } catch {
+        Write-PetLog ('partner audio failed: ' + $_.Exception.Message)
+    }
+}
+
+# 在背景范围里随手挑个落脚点，慢慢走过去（朝向跟着翻）
+function Partner-PickTarget {
+    $maxX = [Math]::Max(0.0, ([double]$script:Window.Width - [double]$script:PartnerWidth))
+    $left = [Math]::Max(0.0, $maxX * 0.08)
+    $right = [Math]::Max($left + 3.0, $maxX * 0.9)
+    if (($right - $left) -gt 3.0) {
+        $script:PartnerTargetX = $left + (Get-Random -Minimum 0 -Maximum ([int]($right - $left)))
+    } else {
+        $script:PartnerTargetX = $left
+    }
+    $bottom = [Math]::Max(0.0, [double]$script:Window.Height - [double]$script:PartnerHeight - 26)
+    Set-PartnerPos $script:PartnerX $bottom
+}
+
+function Step-PartnerWalk {
+    if (-not $script:PartnerVisible) { return }
+    $delta = [double]$script:PartnerTargetX - [double]$script:PartnerX
+    if ([Math]::Abs($delta) -lt 2.0) { return }
+    $step = 3.0
+    if ($delta -lt 0) {
+        $step = -$step
+        if ($script:PartnerFlipTransform.ScaleX -gt 0) { $script:PartnerFlipTransform.ScaleX = -1 }
+    } elseif ($script:PartnerFlipTransform.ScaleX -lt 0) {
+        $script:PartnerFlipTransform.ScaleX = 1
+    }
+    Set-PartnerPos ($script:PartnerX + $step) $script:PartnerY
+}
+
+function Hide-Partner {
+    if ($script:PartnerVisible) { Write-PetLog 'partner hidden from scene' }
+    $script:PartnerVisible = $false
+    $script:PartnerSeq = -1
+    $script:PartnerEmotion = ''
+    $script:PartnerFrames = $null
+    $script:PartnerTimer.Stop()
+    $script:PartnerHideTimer.Stop()
+    $script:PartnerBubble.Visibility = 'Collapsed'
+    $script:PartnerShell.Visibility = 'Collapsed'
+}
+
+# 每轮 /state 都会调：把 B 的台词、表情、位置画进 A 的背景里
+function Update-Partner($state) {
+    $p = $null
+    if ($null -ne $state -and ($state.PSObject.Properties.Name -contains 'partner')) { $p = $state.partner }
+    if ($null -eq $p) { if ($script:PartnerVisible) { Hide-Partner }; return }
+    if (-not $script:SceneMode) { if ($script:PartnerVisible) { Hide-Partner }; return }
+    $showPartner = $true
+    if ($p.PSObject.Properties.Name -contains 'show') { $showPartner = [bool]$p.show }
+    if (-not $showPartner) { if ($script:PartnerVisible) { Hide-Partner }; return }
+
+    $name = '搭子'
+    if ($p.PSObject.Properties.Name -contains 'name') {
+        if (-not [string]::IsNullOrWhiteSpace([string]$p.name)) { $name = [string]$p.name }
+    }
+
+    $w = [Math]::Round([double]$script:PetWidth * $script:PartnerScale)
+    $h = [Math]::Round([double]$script:PetBodyHeight * $script:PartnerScale)
+    if ([Math]::Abs($w - [double]$script:PartnerWidth) -gt 1.0) {
+        $script:PartnerWidth = $w
+        $script:PartnerShell.Width = $w
+        $script:PartnerGrid.RowDefinitions[0].Height = New-Object System.Windows.GridLength([Math]::Round($h * 0.32))
+    }
+    if ([Math]::Abs($h - [double]$script:PartnerHeight) -gt 1.0) {
+        $script:PartnerHeight = $h
+        $script:PartnerShell.Height = $h
+    }
+
+    if (-not $script:PartnerVisible) {
+        $script:PartnerVisible = $true
+        $script:PartnerShell.Visibility = 'Visible'
+        $script:PartnerName = $name
+        $script:PartnerTag.Text = $name
+        Set-PartnerPos ([Math]::Max(0.0, [double]$script:Window.Width * 0.08)) ([Math]::Max(0.0, [double]$script:Window.Height - [double]$script:PartnerHeight - 26))
+        Partner-PickTarget
+        Write-PetLog ('partner in scene -> ' + $name)
+    }
+    if ($script:PartnerName -ne $name) {
+        $script:PartnerName = $name
+        $script:PartnerTag.Text = $name
+    }
+
+    $emotion = 'walking'
+    if ($p.PSObject.Properties.Name -contains 'emotion') { $emotion = [string]$p.emotion }
+    if ($script:Emotions -notcontains $emotion) { $emotion = 'walking' }
+    if ([string]$p.status -eq 'thinking') { $emotion = 'coding' }
+    if ([string]$p.status -eq 'offline') { $emotion = 'crying' }
+    Set-PartnerEmotion $emotion
+
+    $seq = [int]$p.seq
+    if ($seq -ne $script:PartnerSeq) {
+        $script:PartnerSeq = $seq
+        $say = ''
+        if ($p.PSObject.Properties.Name -contains 'say') { $say = [string]$p.say }
+        $duration = 0.0
+        if ($p.PSObject.Properties.Name -contains 'audioDuration') { $duration = [double]$p.audioDuration }
+        if (-not [string]::IsNullOrWhiteSpace($say)) {
+            $hold = [int][Math]::Max(2600, [Math]::Min(14000, ($duration + 3.0) * 1000))
+            Show-PartnerBubble $say $hold
+            Partner-PickTarget
+        }
+        if ($p.PSObject.Properties.Name -contains 'audioPath') { Play-PartnerAudio ([string]$p.audioPath) }
+    }
+}
 function Show-Bubble([string]$Text, [int]$HoldMs) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return }
     $script:BubbleText.Text = $Text
@@ -1459,6 +1687,23 @@ function Update-ScenePanels($state) {
         [void]$statsLines.Add(('收到礼物  ' + $giftCount + ' 个 / ' + [Math]::Round($giftValue, 1) + ' 元'))
         [void]$statsLines.Add(('排队歌曲  ' + $queueLen + ' 首'))
     }
+    # token 用量（插件累计、重启不清零）：直播画面上也看得到花了多少
+    if ($state.PSObject.Properties.Name -contains 'usage' -and $null -ne $state.usage) {
+        $u = $state.usage
+        $totalTok = [int64]0
+        if ($null -ne $u.total) { $totalTok = [int64]$u.total }
+        $turnsUse = 0
+        if ($null -ne $u.turns) { $turnsUse = [int]$u.turns }
+        [void]$statsLines.Add('token  ' + $totalTok.ToString('N0') + ' / ' + $turnsUse + ' 轮')
+        $usageKey = [string]$totalTok + '/' + $turnsUse
+        if ($script:LastUsageLine -ne $usageKey) {
+            $script:LastUsageLine = $usageKey
+            Write-PetLog ('scene token -> ' + $totalTok.ToString('N0') + ' / ' + $turnsUse + ' 轮')
+        }
+        $perMin = 0
+        if ($null -ne $u.perMinute) { $perMin = [int]$u.perMinute }
+        if ($perMin -gt 0) { [void]$statsLines.Add('每分钟  ' + $perMin.ToString('N0')) }
+    }
     $statsText = [string]::Join([Environment]::NewLine, $statsLines)
     if ($script:StatsText.Text -ne $statsText) { $script:StatsText.Text = $statsText }
 }
@@ -1526,6 +1771,7 @@ function Apply-State($state) {
         }
     }
     if (-not $script:IsSlotB) { Update-ScenePanels $state }
+    if (-not $script:IsSlotB) { Update-Partner $state }
 
     $emotion = [string]$state.emotion
     if ($script:Emotions -notcontains $emotion) { $emotion = 'walking' }
@@ -1968,6 +2214,10 @@ $script:FxTimer.Add_Tick({ Step-Fx })
 $script:TopTimer.Interval = [TimeSpan]::FromMilliseconds(3000)
 $script:TopTimer.Add_Tick({ Reassert-Topmost })
 $script:HideTimer.Add_Tick({ $script:HideTimer.Stop(); $script:Bubble.Visibility = 'Collapsed' })
+$script:PartnerTimer.Add_Tick({ Step-PartnerFrame })
+$script:PartnerHideTimer.Add_Tick({ $script:PartnerHideTimer.Stop(); $script:PartnerBubble.Visibility = 'Collapsed' })
+$script:PartnerWalkTimer.Interval = [TimeSpan]::FromMilliseconds(60)
+$script:PartnerWalkTimer.Add_Tick({ Step-PartnerWalk })
 $script:Poll.Interval = [TimeSpan]::FromMilliseconds(700)
 $script:Poll.Add_Tick({ Apply-State (Fetch-State) })
 
@@ -1978,7 +2228,11 @@ $script:Window.Add_Closed({
     $script:WanderDwellTimer.Stop()
     $script:HideTimer.Stop()
     $script:SquashTimer.Stop()
+    $script:PartnerTimer.Stop()
+    $script:PartnerHideTimer.Stop()
+    $script:PartnerWalkTimer.Stop()
     try { $script:Player.Close() } catch { }
+    try { $script:PartnerPlayer.Close() } catch { }
 })
 
 # ---------------------------------------------------------------- 启动
@@ -1988,6 +2242,7 @@ Apply-Size $script:Scale
 Set-PetState 'walking'
 $script:Poll.Start()
 $script:TopTimer.Start()
+$script:PartnerWalkTimer.Start()
 Wander-ScheduleNext
 Write-PetLog ('window started (slot {0}) at scale {1}, state url = {2}, frames = {3}' -f $script:Slot, $script:Scale, $script:StateUrl, $script:FramesRoot)
 

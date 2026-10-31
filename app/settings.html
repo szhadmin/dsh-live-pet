@@ -196,7 +196,7 @@ const TEAM_FIELDS = [
   { key: 'turnGapSec', label: '每句间隔（秒）', type: 'number' },
   { key: 'roundsPerBurst', label: '一波最多几轮', type: 'number' },
   { key: 'quietSec', label: '聊完歇多久（秒）', type: 'number' },
-  { key: 'showPetB', label: '桌面上再放一只小宠物', type: 'bool', hint: '开 = B 也有自己的窗口（左右各一只）；关 = 只留 A，B 的话显示在 A 的气泡里' },
+  { key: 'showPetB', label: 'B 也出镜', type: 'bool', hint: '开 = 连麦时两只都出现（开了背景就画在背景里，没开背景 B 自己一个窗口）；关 = 只留 A，B 的话显示在 A 的气泡里' },
 ]
 
 /* ------------------------------------------------------------------ 渲染器 */
@@ -483,7 +483,7 @@ function renderScene() {
   const mode = pet.sceneEnabled === true ? (pet.sceneMinimized === true ? 'minimal' : 'full') : 'off'
   const card = el('section', { class: 'card' },
     el('h2', { text: '直播背景（最小化 / 关闭）' }),
-    el('div', { class: 'hint', text: '背景是铺满全屏的那张直播画面（左上弹幕池、右上点歌台）。三个按钮点了立刻生效，右键宠物 → 背景 也能切。' }),
+    el('div', { class: 'hint', text: '背景是铺满全屏的那张直播画面（左上弹幕池、右上点歌台、左下本场数据含 token 用量）。开了背景，连麦搭子 B 也会被画在背景里，OBS 抓一个窗口就能同时看到两只。三个按钮点了立刻生效，右键宠物 → 背景 也能切。' }),
     el('div', { class: 'row' },
       el('span', { class: 'label', text: '当前' }),
       el('span', { class: 'pill ' + (mode === 'full' ? 'ok' : ''), text: mode === 'full' ? '全屏背景' : mode === 'minimal' ? '已最小化（只留宠物）' : '已关闭' })),

@@ -914,12 +914,12 @@ window.__ModuleLoader__.load({
 
         h(Card, {
           title: '双智能体（连麦）',
-          hint: '开启后，主宠物会和另一个 AI（默认叫小海豚）在直播间里连麦：要么互相抬杠，要么一起闲聊；观众弹幕随时能插话。',
+          hint: '开启后，主宠物会和另一个 AI（默认叫小海豚）在直播间里连麦：要么互相抬杠，要么一起闲聊；观众弹幕随时能插话。开了直播背景时两只都画在背景里（OBS 抓一个窗口就够），没开背景时 B 自己一个窗口。',
         },
           h(Row, { label: '开关' },
             h(Check, { label: '让它俩互相说话', value: teamValue('enabled') === true, onChange: (v) => setTeamValue('enabled', v) }),
             h(Check, { label: '观众弹幕能插话', value: teamValue('audienceJoin') !== false, onChange: (v) => setTeamValue('audienceJoin', v) }),
-            h(Check, { label: '桌面上再放一只（B 自己一个窗口）', value: teamValue('showPetB') !== false, onChange: (v) => setTeamValue('showPetB', v) })),
+            h(Check, { label: 'B 也出镜', value: teamValue('showPetB') !== false, onChange: (v) => setTeamValue('showPetB', v) })),
           h(Row, { label: '关系' },
             h(Select, {
               value: teamValue('mode') || 'argue',
