@@ -1,4 +1,4 @@
-﻿﻿#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
     小鲸鱼直播宠物 —— DSH 插件 dsh-live-pet 的"身体"。
 
@@ -19,6 +19,8 @@ $script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:FramesRoot = if ($env:PET_FRAMES) { $env:PET_FRAMES } else { Join-Path $script:Root 'frames' }
 $script:StateUrl = if ($env:PET_STATE_URL) { $env:PET_STATE_URL } else { 'http://127.0.0.1:64420/dsh-live-pet/state' }
 $script:ChatUrl = $script:StateUrl -replace '/state$', '/chat'
+# 插件的其它接口都挂在这个前缀下（/poses、/pose、/config）
+$script:HostBase = $script:StateUrl -replace '/state$', ''
 $script:LogFile = Join-Path $script:Root 'pet-window.log'
 $script:FrameSize = 240
 $script:ScaleSteps = @(0.6, 0.85, 1.1, 1.35)
@@ -125,9 +127,12 @@ $script:Image.HorizontalAlignment = 'Center'
 $script:Squash = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
 # 翻转（ScaleX = -1）和挤压是两套变换，合成一个组才不会互相覆盖
 $script:Flip = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+# 位移：动作特效（蹦一下 / 抖一抖）用，只动渲染，不改窗口几何
+$script:Shift = New-Object System.Windows.Media.TranslateTransform(0, 0)
 $script:ImageTransforms = New-Object System.Windows.Media.TransformGroup
 [void]$script:ImageTransforms.Children.Add($script:Squash)
 [void]$script:ImageTransforms.Children.Add($script:Flip)
+[void]$script:ImageTransforms.Children.Add($script:Shift)
 $script:Image.RenderTransformOrigin = [System.Windows.Point]::new(0.5, 1.0)
 $script:Image.RenderTransform = $script:ImageTransforms
 
@@ -174,6 +179,8 @@ $script:Board.Child = $script:BoardText
 # 直播场景：背景图 + 左上角弹幕池 + 右上角点歌台，全部画在同一个窗口里
 # （单窗口的好处：OBS 直接抓这个窗口就够了，不用多个来源对齐）
 $script:SceneMode = $false
+# 背景的三态：full / minimal（收起来只留宠物）/ off
+$script:SceneDisplay = ''
 $script:PetX = 0.0
 $script:PetY = 0.0
 
@@ -738,6 +745,55 @@ function Step-Squash {
 
 $script:TouchLines = @('别戳啦～', '痒！', '哎哟，摸头了？', '在的在的', '有事说事，别上手', '这一下力气不小啊')
 
+# ------------------------------------------------------------ 动作特效
+# 动作 = 情绪（帧序列）+ 时长 + 一点特效，由插件下发 state.pose.fx 或右键菜单触发。
+$script:PoseKind = ''
+$script:PoseStep = 0
+$script:PoseTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:PoseTimer.Interval = [TimeSpan]::FromMilliseconds(40)
+
+function Invoke-PoseFx([string]$Kind) {
+    $script:Shift.X = 0
+    $script:Shift.Y = 0
+    switch ($Kind) {
+        'squash' { Invoke-Squash; return }
+        'firework' { Start-Firework; Invoke-Squash; return }
+        'spin' {
+            # 转个身：左右翻转一次，到点自己翻回来
+            if ($script:Flip.ScaleX -lt 0) { $script:Flip.ScaleX = 1.0 } else { $script:Flip.ScaleX = -1.0 }
+            return
+        }
+        'shake' { $script:PoseKind = 'shake'; $script:PoseStep = 0; $script:PoseTimer.Start(); return }
+        'hop' { $script:PoseKind = 'hop'; $script:PoseStep = 0; $script:PoseTimer.Start(); return }
+        default { return }
+    }
+}
+
+function Step-PoseFx {
+    $script:PoseStep++
+    $step = $script:PoseStep
+    if ($script:PoseKind -eq 'hop') {
+        # 9 步一个正弦跳：先上后下
+        $height = [Math]::Sin([Math]::PI * [Math]::Min(1.0, $step / 9.0)) * 26
+        $script:Shift.Y = - $height
+        if ($step -ge 9) {
+            $script:PoseTimer.Stop()
+            $script:Shift.Y = 0
+        }
+        return
+    }
+    if ($script:PoseKind -eq 'shake') {
+        if ($step % 2 -eq 0) { $script:Shift.X = 8 } else { $script:Shift.X = -8 }
+        if ($step -ge 8) {
+            $script:PoseTimer.Stop()
+            $script:Shift.X = 0
+        }
+        return
+    }
+    $script:PoseTimer.Stop()
+}
+$script:PoseTimer.Add_Tick({ Step-PoseFx })
+
 # ---------------------------------------------------------------- 输入条
 function Show-Input {
     $script:Bubble.Visibility = 'Collapsed'
@@ -780,9 +836,78 @@ function Send-Chat([string]$Text) {
     }
 }
 
-# ---------------------------------------------------------------- 状态轮询
-function Fetch-State {
+# ------------------------------------------------- 跟插件要东西（动作 / 背景）
+function Send-HostJson([string]$Path, [string]$Method, [string]$Body, [int]$TimeoutMs = 4000) {
+    $url = $script:HostBase + $Path
     try {
+        $request = [System.Net.HttpWebRequest]::Create($url)
+        $request.Method = $Method
+        $request.Timeout = $TimeoutMs
+        $request.ReadWriteTimeout = $TimeoutMs
+        $request.Proxy = $null
+        if ($Method -ne 'GET' -and $Body -ne '') {
+            $request.ContentType = 'application/json; charset=utf-8'
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
+            $request.ContentLength = $bytes.Length
+            $stream = $request.GetRequestStream()
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Close()
+        }
+        $response = $request.GetResponse()
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+        $text = $reader.ReadToEnd()
+        $reader.Close()
+        $response.Close()
+        if ($text -eq '') { return $null }
+        return $text | ConvertFrom-Json
+    } catch {
+        Write-PetLog ('host ' + $Path + ' failed: ' + $_.Exception.Message)
+        return $null
+    }
+}
+
+# 动作库：直接从插件拿，设置页里加了自定义动作这里也会跟着变
+function Get-Poses {
+    $result = Send-HostJson '/poses' 'GET' '' 3000
+    if ($null -eq $result -or $result.ok -ne $true) { return @() }
+    return @($result.poses)
+}
+
+function Invoke-PetPose([string]$Id) {
+    if ([string]::IsNullOrWhiteSpace($Id)) { return }
+    $result = Send-HostJson ('/pose?id=' + [uri]::EscapeDataString($Id)) 'POST' '' 5000
+    if ($null -eq $result -or $result.ok -ne $true) {
+        Show-Bubble '这个动作没触发成功' 2500
+        return
+    }
+    Write-PetLog ('pose requested: ' + $Id)
+}
+
+# 背景：full = 全屏直播场景；minimal = 背景收起来只留宠物；off = 关掉背景
+function Set-BackgroundMode([string]$Mode) {
+    $pet = @{}
+    switch ($Mode) {
+        'full' { $pet['sceneEnabled'] = $true; $pet['sceneMinimized'] = $false }
+        'minimal' { $pet['sceneEnabled'] = $true; $pet['sceneMinimized'] = $true }
+        'off' { $pet['sceneEnabled'] = $false; $pet['sceneMinimized'] = $false }
+        default { return }
+    }
+    $body = ConvertTo-Json @{ pet = $pet } -Depth 4 -Compress
+    $result = Send-HostJson '/config' 'POST' $body 6000
+    if ($null -eq $result -or $result.ok -ne $true) {
+        Show-Bubble '背景设置没保存成功' 2500
+        return
+    }
+    Write-PetLog ('background mode -> ' + $Mode)
+    switch ($Mode) {
+        'full' { Show-Bubble '背景回来了' 1600 }
+        'minimal' { Show-Bubble '背景先收起来' 1600 }
+        'off' { Show-Bubble '背景关掉了' 1600 }
+    }
+}
+
+# ---------------------------------------------------------------- 状态轮询
+function Fetch-State {    try {
         $request = [System.Net.HttpWebRequest]::Create($script:StateUrl)
         $request.Timeout = 1500
         $request.ReadWriteTimeout = 1500
@@ -1062,6 +1187,19 @@ function Add-PoolRow($item, [int]$ageFromNewest, [int]$total) {
             $runSay.Text = $text
             $runSay.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 214, 255, 233))
         }
+        'agent-b' {
+            # 双智能体里的搭子：换个颜色，一眼看出是谁在说话
+            $runWho.Text = ($who + '：')
+            $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 255, 175, 130))
+            $runSay.Text = $text
+            $runSay.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 255, 226, 208))
+        }
+        'pose' {
+            $runWho.Text = ('[动作] ')
+            $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 202, 178, 255))
+            $runSay.Text = ($who + ' ' + $text)
+            $runSay.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 231, 224, 255))
+        }
         default {
             $runWho.Text = ($who + '：')
             $runWho.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(255, 127, 212, 255))
@@ -1226,7 +1364,17 @@ function Apply-State($state) {
     # 直播场景：开关、背景图、字号（每轮都读，改设置立刻生效）
     if ($state.PSObject.Properties.Name -contains 'scene') {
         $sc = $state.scene
-        Set-SceneMode ([bool]$sc.enabled) ([string]$sc.imagePath)
+        # display: full = 全屏背景；minimal = 背景收起来只留宠物；off = 没开背景
+        $display = ''
+        if ($sc.PSObject.Properties.Name -contains 'display') { $display = [string]$sc.display }
+        if ([string]::IsNullOrWhiteSpace($display)) {
+            if ([bool]$sc.enabled) { $display = 'full' } else { $display = 'off' }
+        }
+        if ($display -ne $script:SceneDisplay) {
+            Write-PetLog ('scene display -> ' + $display)
+            $script:SceneDisplay = $display
+        }
+        Set-SceneMode ($display -eq 'full') ([string]$sc.imagePath)
         $poolFont = [double]$sc.poolFontSize
         if ($poolFont -ge 10 -and $poolFont -le 60 -and [Math]::Abs($poolFont - $script:PoolFontSize) -gt 0.1) {
             $script:PoolFontSize = $poolFont
@@ -1275,11 +1423,32 @@ function Apply-State($state) {
     $say = [string]$state.say
     $duration = [double]$state.audioDuration
     if (-not [string]::IsNullOrWhiteSpace($say)) {
+        # 双智能体连麦时，气泡前面带上是「谁」说的
+        $who = ''
+        if ($state.PSObject.Properties.Name -contains 'speaker') { $who = [string]$state.speaker }
+        $me = ''
+        if ($state.PSObject.Properties.Name -contains 'config' -and $null -ne $state.config) {
+            if ($state.config.PSObject.Properties.Name -contains 'petName') { $me = [string]$state.config.petName }
+        }
+        if ($who -ne '' -and $me -ne '' -and $who -ne $me) { $say = $who + '：' + $say }
         $hold = [int][Math]::Max(3000, [Math]::Min(15000, ($duration + 3.0) * 1000))
         Show-Bubble $say $hold
     }
     if ($state.PSObject.Properties.Name -contains 'audioPath') {
         Play-Audio ([string]$state.audioPath)
+    }
+
+    # 主动动作（右键菜单 / 设置页 / 插件触发）：情绪已经由 emotion 带上，这里补特效
+    if ($state.PSObject.Properties.Name -contains 'pose' -and $null -ne $state.pose) {
+        $poseFx = 'none'
+        if ($state.pose.PSObject.Properties.Name -contains 'fx') { $poseFx = [string]$state.pose.fx }
+        if (-not [string]::IsNullOrWhiteSpace($poseFx) -and $poseFx -ne 'none') { Invoke-PoseFx $poseFx }
+        $poseLabel = ''
+        if ($state.pose.PSObject.Properties.Name -contains 'label') { $poseLabel = [string]$state.pose.label }
+        if (-not [string]::IsNullOrWhiteSpace($poseLabel) -and [string]::IsNullOrWhiteSpace($say)) {
+            Show-Bubble $poseLabel 2200
+        }
+        Write-PetLog ('pose -> ' + $poseFx)
     }
 }
 
@@ -1559,6 +1728,64 @@ $chatItem = New-Object System.Windows.Controls.MenuItem
 $chatItem.Header = '跟它说句话'
 $chatItem.Add_Click({ Show-Input })
 [void]$menu.Items.Add($chatItem)
+
+# 动作：主动让它演一个（动作库从插件 /poses 拿，设置页加了自定义动作这里会自动出现）
+$script:PoseMenu = New-Object System.Windows.Controls.MenuItem
+$script:PoseMenu.Header = '动作'
+
+function Update-PoseMenu {
+    $poses = Get-Poses
+    $script:PoseMenu.Items.Clear()
+    if ($poses.Count -eq 0) {
+        $empty = New-Object System.Windows.Controls.MenuItem
+        $empty.Header = '(没拿到动作库)'
+        $empty.IsEnabled = $false
+        [void]$script:PoseMenu.Items.Add($empty)
+        return
+    }
+    foreach ($pose in $poses) {
+        $item = New-Object System.Windows.Controls.MenuItem
+        $poseId = [string]$pose.id
+        $poseLabel = [string]$pose.label
+        if ($poseLabel -eq '') { $poseLabel = $poseId }
+        $item.Header = $poseLabel
+        $item.Tag = $poseId
+        $item.Add_Click({ param($sender, $eventArgs) Invoke-PetPose ([string]$sender.Tag) })
+        [void]$script:PoseMenu.Items.Add($item)
+    }
+}
+
+# 背景：全屏 / 收起来只有宠物 / 关掉
+$script:BgMenu = New-Object System.Windows.Controls.MenuItem
+$script:BgMenu.Header = '背景'
+$script:BgFullItem = New-Object System.Windows.Controls.MenuItem
+$script:BgFullItem.Header = '全屏背景'
+$script:BgFullItem.IsCheckable = $true
+$script:BgFullItem.Add_Click({ Set-BackgroundMode 'full' })
+[void]$script:BgMenu.Items.Add($script:BgFullItem)
+$script:BgMinItem = New-Object System.Windows.Controls.MenuItem
+$script:BgMinItem.Header = '最小化背景（只留宠物）'
+$script:BgMinItem.IsCheckable = $true
+$script:BgMinItem.Add_Click({ Set-BackgroundMode 'minimal' })
+[void]$script:BgMenu.Items.Add($script:BgMinItem)
+$script:BgOffItem = New-Object System.Windows.Controls.MenuItem
+$script:BgOffItem.Header = '关闭背景'
+$script:BgOffItem.IsCheckable = $true
+$script:BgOffItem.Add_Click({ Set-BackgroundMode 'off' })
+[void]$script:BgMenu.Items.Add($script:BgOffItem)
+[void]$menu.Items.Add($script:BgMenu)
+[void]$menu.Items.Add($script:PoseMenu)
+
+# 菜单一打开就刷新：动作库可能刚在设置页里改过
+$menu.Add_Opened({
+    try {
+        Update-PoseMenu
+        $display = $script:SceneDisplay
+        $script:BgFullItem.IsChecked = ($display -eq 'full')
+        $script:BgMinItem.IsChecked = ($display -eq 'minimal')
+        $script:BgOffItem.IsChecked = ($display -eq 'off' -or $display -eq '')
+    } catch { }
+})
 
 $boardItem = New-Object System.Windows.Controls.MenuItem
 $boardItem.Header = '歌单板'

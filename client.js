@@ -198,6 +198,8 @@ window.__ModuleLoader__.load({
       const [deps, setDeps] = React.useState(null)
       const [backgrounds, setBackgrounds] = React.useState([])
       const [depsBusy, setDepsBusy] = React.useState(false)
+      const [poses, setPoses] = React.useState([])
+      const [posesText, setPosesText] = React.useState('[]')
 
       async function load() {
         try {
@@ -213,6 +215,9 @@ window.__ModuleLoader__.load({
           setActionsText(settings && settings.gift_actions && settings.gift_actions.actions
             ? JSON.stringify(settings.gift_actions.actions, null, 2)
             : '{}')
+          const custom = payload.pet && Array.isArray(payload.pet.posesCustom) ? payload.pet.posesCustom : []
+          setPosesText(JSON.stringify(custom, null, 2))
+          void refreshPoses()
         } catch (error) {
           setMessage({ kind: 'err', text: '读取配置失败：' + (error && error.message ? error.message : error) })
         }
@@ -228,6 +233,81 @@ window.__ModuleLoader__.load({
         setLiveDraft((draft) => (draft === null ? draft : setPath(draft, path, value)))
         setLiveGroups((groups) => (groups.includes(group) ? groups : groups.concat([group])))
       }
+
+      /* ---- 动作库：内置的从插件读，自定义的存在 posesCustom 里 ---- */
+      async function refreshPoses() {
+        try {
+          const response = await fetch('/dsh-live-pet/poses', { headers: { accept: 'application/json' } })
+          const payload = await response.json()
+          setPoses(Array.isArray(payload.poses) ? payload.poses : [])
+        } catch {
+          setPoses([])
+        }
+      }
+
+      /** 一个设置项直接落盘（不经过「保存」按钮的那种快捷开关）。 */
+      async function postPet(patch, okText) {
+        setBusy(true)
+        setMessage({ kind: '', text: '' })
+        try {
+          const response = await fetch('/dsh-live-pet/config', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ pet: patch }),
+          })
+          const payload = await response.json()
+          if (payload.petSaved === true) {
+            setPet(payload.pet || {})
+            setMessage({ kind: 'ok', text: okText })
+            return true
+          }
+          setMessage({ kind: 'err', text: payload.error || '保存失败' })
+        } catch (error) {
+          setMessage({ kind: 'err', text: '保存失败：' + (error && error.message ? error.message : error) })
+        } finally {
+          setBusy(false)
+        }
+        return false
+      }
+
+      /** 背景三态：全屏 / 最小化（只留宠物）/ 关闭。 */
+      function applySceneMode(mode) {
+        const patch = mode === 'off'
+          ? { sceneEnabled: false, sceneMinimized: false }
+          : mode === 'minimal'
+            ? { sceneEnabled: true, sceneMinimized: true }
+            : { sceneEnabled: true, sceneMinimized: false }
+        const text = mode === 'off' ? '背景已关闭（宠物仍在桌面上）'
+          : mode === 'minimal' ? '背景已最小化：只留宠物，OBS 里可以先把背景那路关掉'
+            : '背景已全屏铺开'
+        void postPet(patch, text)
+      }
+
+      async function savePoses() {
+        let list
+        try {
+          list = posesText.trim() === '' ? [] : JSON.parse(posesText)
+        } catch (error) {
+          setMessage({ kind: 'err', text: '动作 JSON 语法错误：' + (error && error.message ? error.message : error) })
+          return
+        }
+        if (!Array.isArray(list)) {
+          setMessage({ kind: 'err', text: '动作必须是一个 JSON 数组，例如 [{"id":"jing","label":"敬个礼","emotion":"happy","sec":5,"fx":"squash"}]' })
+          return
+        }
+        const saved = await postPet({ posesCustom: list }, `已保存 ${list.length} 个自定义动作，右键菜单里立刻能看到`)
+        if (saved) void refreshPoses()
+      }
+
+      /* ---- 双智能体（连麦）：multiAgent 是嵌套对象，逐字段改 ---- */
+      const teamValue = (key) => {
+        const draft = petDraft.multiAgent || (pet && pet.multiAgent) || {}
+        return draft[key]
+      }
+      const setTeamValue = (key, value) => setPetDraft((draft) => {
+        const current = draft.multiAgent || (pet && pet.multiAgent) || {}
+        return { ...draft, multiAgent: { ...current, [key]: value } }
+      })
 
       async function savePet() {
         setBusy(true)
@@ -592,6 +672,14 @@ window.__ModuleLoader__.load({
               value: petValue('sceneEnabled') === true,
               onChange: (v) => setPetValue('sceneEnabled', v),
             })),
+          h(Row, { label: '背景窗口' },
+            h('button', { style: styles.button, disabled: busy, onClick: () => applySceneMode('full') }, '全屏背景'),
+            h('button', { style: styles.button, disabled: busy, onClick: () => applySceneMode('minimal') }, '最小化背景'),
+            h('button', { style: styles.button, disabled: busy, onClick: () => applySceneMode('off') }, '关闭背景'),
+            h('span', { style: styles.hint },
+              (petValue('sceneEnabled') === true
+                ? (petValue('sceneMinimized') === true ? '当前：最小化（只留宠物）' : '当前：全屏')
+                : '当前：已关闭') + ' · 三个按钮点了立刻生效，也可以右键宠物 → 背景')),
           h(Row, { label: '背景图' },
             h(Select, {
               value: petValue('sceneImage') || '',
@@ -635,7 +723,10 @@ window.__ModuleLoader__.load({
             h(Number, { value: petValue('wanderDwellMinSec'), onChange: (v) => setPetValue('wanderDwellMinSec', v === '' ? 6 : v) }),
             h('span', { style: styles.hint }, '到'), 
             h(Number, { value: petValue('wanderDwellMaxSec'), onChange: (v) => setPetValue('wanderDwellMaxSec', v === '' ? 18 : v) }),
-            h('span', { style: styles.hint }, '秒之间随机停一会儿；你点它、拖它、打字时会自动暂停')),          h(Row, { label: '人设' },
+            h('span', { style: styles.hint }, '秒之间随机停一会儿；你点它、拖它、打字时会自动暂停')),          h(Row, { label: '宠物名字' },
+            h(Text, { value: petValue('petName'), placeholder: '大肥鲸', onChange: (v) => setPetValue('petName', v) }),
+            h('span', { style: styles.hint }, '弹幕池署名、气泡落款用；连麦时用来区分谁在说话')),
+          h(Row, { label: '人设' },
             h(TextArea, {
               value: petValue('persona'),
               placeholder: '留空就用内置默认人设（大肥鲸）。想改性格/说话方式就在这里写，例如：\n你是直播间里一只爱吐槽的海獭，说话短、爱用「哎」开头，不懂就说不知道。',
@@ -715,6 +806,72 @@ window.__ModuleLoader__.load({
           h('div', { style: styles.row },
             h('button', { style: styles.buttonPrimary, disabled: busy, onClick: savePet }, '保存宠物设置'),
             props.close ? h('button', { style: styles.button, disabled: busy, onClick: props.close }, '关闭') : null)),
+
+        h(Card, {
+          title: '动作（右键菜单）',
+          hint: '右键点宠物 → 动作，就能让它当场演一个。下面能看到全部动作，也能自己加。',
+        },
+          h(Row, { label: '动作库' },
+            h('span', { style: styles.hint }, poses.length === 0
+              ? '（还没读到，点右边刷新）'
+              : poses.map((pose) => pose.label).join('、')),
+            h('button', { style: styles.button, onClick: () => refreshPoses() }, '刷新')),
+          h('div', { style: styles.hint },
+            '自定义动作：JSON 数组。字段 —— id：英文短名；label：菜单上显示的字；'
+            + 'emotion：情绪帧（happy / mischievous / crying / unhappy / eating / cooking / coding / tv / walking）；'
+            + 'sec：演多少秒；fx：特效（none / squash 挤压 / firework 烟花 / shake 抖一抖 / spin 转个身 / hop 蹦一下）。'),
+          h('div', { style: styles.hint },
+            '例：[{"id":"jing","label":"敬个礼","emotion":"happy","sec":5,"fx":"squash"},{"id":"sad","label":"装可怜","emotion":"crying","sec":6,"fx":"shake"}]'),
+          h('textarea', {
+            style: styles.area,
+            value: posesText,
+            spellCheck: false,
+            onChange: (event) => setPosesText(event.target.value),
+          }),
+          h('div', { style: styles.row },
+            h('button', { style: styles.buttonPrimary, disabled: busy, onClick: savePoses }, '保存自定义动作'))),
+
+        h(Card, {
+          title: '双智能体（连麦）',
+          hint: '开启后，主宠物会和另一个 AI（默认叫小海豚）在直播间里连麦：要么互相抬杠，要么一起闲聊；观众弹幕随时能插话。',
+        },
+          h(Row, { label: '开关' },
+            h(Check, { label: '让它俩互相说话', value: teamValue('enabled') === true, onChange: (v) => setTeamValue('enabled', v) }),
+            h(Check, { label: '观众弹幕能插话', value: teamValue('audienceJoin') !== false, onChange: (v) => setTeamValue('audienceJoin', v) })),
+          h(Row, { label: '关系' },
+            h(Select, {
+              value: teamValue('mode') || 'argue',
+              options: [['argue', '互相抬杠（吵架）'], ['chat', '搭子闲聊']],
+              onChange: (v) => setTeamValue('mode', v),
+            })),
+          h(Row, { label: '对方名字' },
+            h(Text, { value: teamValue('nameB'), placeholder: '小海豚', onChange: (v) => setTeamValue('nameB', v) })),
+          h(Row, { label: '对方人设' },
+            h(TextArea, {
+              value: teamValue('personaB'),
+              rows: 4,
+              placeholder: '留空就用内置的「抬杠搭子」人设。想换成捧哏、或者另一个完全不同的角色，在这里写。',
+              onChange: (v) => setTeamValue('personaB', v),
+            })),
+          h(Row, { label: '对方 DSH profile' },
+            h(Text, {
+              value: teamValue('profileB'),
+              placeholder: '留空 = 跟主宠物同一个 profile，只隔离会话',
+              onChange: (v) => setTeamValue('profileB', v),
+            }),
+            h('span', { style: styles.hint }, '想让它用别的模型/别的权限档，就填另一个 profile 名')),
+          h(Row, { label: '节奏' },
+            h('span', { style: styles.hint }, '冷场 '),
+            h(Number, { value: teamValue('idleStartSec'), onChange: (v) => setTeamValue('idleStartSec', v === '' ? 45 : v) }),
+            h('span', { style: styles.hint }, '秒后开聊 · 每句间隔 '),
+            h(Number, { value: teamValue('turnGapSec'), onChange: (v) => setTeamValue('turnGapSec', v === '' ? 3 : v) }),
+            h('span', { style: styles.hint }, '秒 · 一波最多 '),
+            h(Number, { value: teamValue('roundsPerBurst'), onChange: (v) => setTeamValue('roundsPerBurst', v === '' ? 8 : v) }),
+            h('span', { style: styles.hint }, '轮 · 聊完歇 '),
+            h(Number, { value: teamValue('quietSec'), onChange: (v) => setTeamValue('quietSec', v === '' ? 60 : v) }),
+            h('span', { style: styles.hint }, '秒')),
+          h('div', { style: styles.row },
+            h('button', { style: styles.buttonPrimary, disabled: busy, onClick: savePet }, '保存双智能体设置'))),
 
         h('div', { style: styles.hint },
           '提示：改完「直播服务」里的开关后，直播服务会把它写进自己的 settings.json；' +

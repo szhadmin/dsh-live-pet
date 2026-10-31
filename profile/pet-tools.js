@@ -5,7 +5,7 @@
  * 在无人值守的子进程里没有审批应答者，升级请求会被直接放行 —— 等于没锁。
  * 这里用 Node 自己读系统信息：没有写路径，只读是代码保证的，不依赖沙箱。
  */
-import { statfsSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { statfsSync, readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
@@ -398,6 +398,264 @@ export function apply(ctx, config = {}) {
       const payload = await response.json()
       const next = payload && payload.next && typeof payload.next === 'object' ? payload.next : null
       return { ok: true, message: next ? `已切到《${String(next.title || '')}》` : '已切歌，队列空了' }
+    },
+  }))
+
+  /* ---- 看一眼 DSH 自己：home / profiles / 会话记录（全部只读） ---------- */
+
+  const dshHome = process.env.DSH_HOME && String(process.env.DSH_HOME).trim() !== ''
+    ? String(process.env.DSH_HOME).trim()
+    : join(os.homedir(), '.dsh')
+
+  function listDir(path) {
+    try {
+      return readdirSync(path)
+    } catch {
+      return []
+    }
+  }
+
+  /** 会话文件是按帧追加的 zstd，多帧拼接；按魔数切开逐帧解压。 */
+  let zstdDecode = null
+  async function decodeSessionFile(file) {
+    if (zstdDecode === null) {
+      try {
+        const zlib = await import('node:zlib')
+        zstdDecode = typeof zlib.zstdDecompressSync === 'function' ? zlib.zstdDecompressSync : false
+      } catch {
+        zstdDecode = false
+      }
+    }
+    if (zstdDecode === false) return ''
+    const buffer = readFileSync(file)
+    const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+    const starts = []
+    let at = 0
+    while (starts.length < 4096) {
+      const found = buffer.indexOf(magic, at)
+      if (found < 0) break
+      starts.push(found)
+      at = found + 4
+    }
+    if (starts.length === 0) return ''
+    let out = ''
+    for (let index = 0; index < starts.length; index += 1) {
+      const start = starts[index]
+      const end = index + 1 < starts.length ? starts[index + 1] : buffer.length
+      try {
+        out += zstdDecode(buffer.subarray(start, end)).toString('utf8')
+      } catch {
+        // 魔数撞进压缩数据里了：这一帧跳过，不影响别的帧
+      }
+    }
+    return out
+  }
+
+  function readJsonLines(raw) {
+    const events = []
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed === '') continue
+      try {
+        events.push(JSON.parse(trimmed))
+      } catch {
+        // 半截行（正在写）忽略
+      }
+    }
+    return events
+  }
+
+  /** 从事件里抠出人话：user / assistant 的消息文本。 */
+  function eventText(event) {
+    const message = event && event.data && event.data.message ? event.data.message : null
+    if (!message) return null
+    const role = String(message.role || '')
+    if (role !== 'user' && role !== 'assistant') return null
+    const parts = Array.isArray(message.content) ? message.content : []
+    const body = parts
+      .filter((part) => part && part.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (body === '') return null
+    return { role, text: body }
+  }
+
+  ctx.effect(() => ctx.tools.register({
+    name: 'dsh_info',
+    description: '看一眼这台电脑上的 DeepSeek Harness（DSH）本身：安装位置、有哪些 profile 及各自的组合包、'
+      + '会话记录有多少、配置文件在哪。老板问「DSH 现在什么情况」「我有哪些 profile」「你跑在哪个 DSH 上」时用这个。'
+      + '全部只读。',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output: {
+      schema: {
+        type: 'object',
+        properties: { summary: { type: 'string' } },
+        required: ['summary'],
+      },
+      render: (args, value) => text(value && value.summary ? value.summary : ''),
+    },
+    async execute() {
+      const lines = []
+      const exists = (() => { try { return statSync(dshHome).isDirectory() } catch { return false } })()
+      lines.push(`DSH_HOME: ${dshHome}${exists ? '' : '（不存在/读不到）'}`)
+      if (!exists) return { summary: lines.join('\n') }
+
+      const profilesDir = join(dshHome, 'profiles')
+      const profiles = listDir(profilesDir)
+      lines.push(`profiles（${profiles.length}）: ${profiles.join('、') || '(无)'}`)
+      for (const name of profiles.slice(0, 8)) {
+        let bundles = '(读不到 package.json)'
+        try {
+          const pkg = JSON.parse(readFileSync(join(profilesDir, name, 'package.json'), 'utf8').replace(/^\uFEFF/, ''))
+          const list = pkg && pkg.dsh && pkg.dsh.profile && Array.isArray(pkg.dsh.profile.bundles) ? pkg.dsh.profile.bundles : []
+          bundles = list.length > 0 ? list.join(' + ') : '(空)'
+        } catch { /* 保持提示文案 */ }
+        const patched = (() => { try { return statSync(join(profilesDir, name, 'cordis.patch.yml')).size } catch { return 0 } })()
+        lines.push(`  · ${name}: bundles=[${bundles}] patch=${patched}B`)
+      }
+
+      const sessionsDir = join(dshHome, 'sessions')
+      const workspaces = listDir(sessionsDir)
+      let total = 0
+      const rows = []
+      for (const workspace of workspaces) {
+        const dir = join(sessionsDir, workspace)
+        const ids = listDir(dir).filter((entry) => entry.startsWith('session-'))
+        total += ids.length
+        if (ids.length > 0) rows.push(`  · ${workspace.slice(0, 70)}: ${ids.length} 个会话`)
+      }
+      lines.push(`会话记录: 共 ${total} 个（工作区分组）`)
+      lines.push(...rows.slice(0, 6))
+
+      const configFiles = ['.env', 'prompt-inject.md', '.credentials.yaml', 'profiles'].filter((name) => {
+        try { statSync(join(dshHome, name)); return true } catch { return false }
+      })
+      lines.push(`DSH_HOME 下的东西: ${configFiles.join('、')}`)
+      let envKeys = []
+      try {
+        envKeys = readFileSync(join(dshHome, '.env'), 'utf8')
+          .split(/\r?\n/)
+          .map((line) => line.split('=')[0].trim())
+          .filter((key) => key !== '' && !key.startsWith('#'))
+      } catch { /* 没有 .env */ }
+      if (envKeys.length > 0) lines.push(`.env 里的键（只有名字，值我不会读）: ${envKeys.join('、')}`)
+      lines.push('要细看某个文件就用 read_text_file 读绝对路径；想看具体会话就调 dsh_session_read。')
+      return { summary: lines.join('\n') }
+    },
+  }))
+
+  ctx.effect(() => ctx.tools.register({
+    name: 'dsh_sessions',
+    description: '列出最近的 DSH 会话记录（按最后修改时间倒序）：属于哪个工作区、会话 id、多大、什么时候更新的。'
+      + '想看某条会话里聊了什么，再拿 id 调 dsh_session_read。',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', description: '列几条，默认 10，最多 30' },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: { summary: { type: 'string' } },
+        required: ['summary'],
+      },
+      render: (args, value) => text(value && value.summary ? value.summary : ''),
+    },
+    async execute(args) {
+      const limit = Math.max(1, Math.min(30, Number(args && args.limit) || 10))
+      const sessionsDir = join(dshHome, 'sessions')
+      const found = []
+      for (const workspace of listDir(sessionsDir)) {
+        const dir = join(sessionsDir, workspace)
+        for (const id of listDir(dir)) {
+          if (!id.startsWith('session-')) continue
+          const file = join(dir, id, 'session.v4.jsonl.zstd')
+          try {
+            const info = statSync(file)
+            found.push({ workspace, id, size: info.size, mtime: info.mtimeMs })
+          } catch {
+            found.push({ workspace, id, size: 0, mtime: 0 })
+          }
+        }
+      }
+      found.sort((a, b) => b.mtime - a.mtime)
+      const rows = found.slice(0, limit).map((row) => {
+        const when = row.mtime > 0 ? new Date(row.mtime).toLocaleString('zh-CN') : '(未知时间)'
+        return `· ${when}  ${row.id}\n  工作区 ${row.workspace.slice(0, 80)}  ${(row.size / 1024).toFixed(0)}KB`
+      })
+      return {
+        summary: found.length === 0
+          ? '没有找到会话记录。'
+          : `最近 ${rows.length} 个会话（共 ${found.length} 个）：\n${rows.join('\n')}`,
+      }
+    },
+  }))
+
+  ctx.effect(() => ctx.tools.register({
+    name: 'dsh_session_read',
+    description: '读一条 DSH 会话记录里的人和 AI 说的话（只读，压缩存档也能解）。'
+      + '老板问「你刚才那轮都说了什么」「上次那个会话聊了啥」时用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '会话 id，例如 session-xxxx（dsh_sessions 里能拿到）' },
+        limit: { type: 'integer', description: '取最后多少条消息，默认 12，最多 40' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: { summary: { type: 'string' } },
+        required: ['summary'],
+      },
+      render: (args, value) => text(value && value.summary ? value.summary : ''),
+    },
+    async execute(args) {
+      const id = String((args && args.id) || '').trim()
+      const limit = Math.max(1, Math.min(40, Number(args && args.limit) || 12))
+      if (id === '') throw new Error('id 必填')
+      const sessionsDir = join(dshHome, 'sessions')
+      let file = ''
+      let workspace = ''
+      for (const name of listDir(sessionsDir)) {
+        const candidate = join(sessionsDir, name, id, 'session.v4.jsonl.zstd')
+        try {
+          statSync(candidate)
+          file = candidate
+          workspace = name
+          break
+        } catch { /* 下一个工作区 */ }
+      }
+      if (file === '') throw new Error(`找不到会话 ${id}（先用 dsh_sessions 看看有哪些）`)
+      const events = readJsonLines(await decodeSessionFile(file))
+      if (events.length === 0) return { summary: '这个会话文件解不开或还是空的。' }
+      let title = ''
+      const messages = []
+      for (const event of events) {
+        if (event && event.type === 'session/title') {
+          const data = event.data || {}
+          title = String(data.title || data.text || '').slice(0, 80)
+          continue
+        }
+        const line = eventText(event)
+        if (line !== null) messages.push(line)
+      }
+      const tail = messages.slice(-limit)
+      if (tail.length === 0) return { summary: `会话 ${id} 里没有可读的对话（只有系统事件）。` }
+      const body = tail.map((item) => `${item.role === 'user' ? '老板/观众' : 'AI'}: ${item.text.slice(0, 300)}`)
+      return {
+        summary: [
+          `会话 ${id}${title !== '' ? `《${title}》` : ''}（工作区 ${workspace.slice(0, 60)}）`,
+          `最后 ${tail.length} 条：`,
+          ...body,
+        ].join('\n'),
+      }
     },
   }))
 }

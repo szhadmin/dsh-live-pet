@@ -35,6 +35,7 @@ const EMOTIONS = ['happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cookin
 const PET_CONFIG_KEYS = [
   'sceneEnabled',
   'sceneImage',
+  'sceneMinimized',
   'bubbleFontSize',
   'poolFontSize',
   'wander',
@@ -42,6 +43,9 @@ const PET_CONFIG_KEYS = [
   'wanderDwellMinSec',
   'wanderDwellMaxSec',
   'persona',
+  'petName',
+  'posesCustom',
+  'multiAgent',
   'mode', 'profile', 'manageProfile', 'appUrl', 'pollMs', 'replyKinds',
   'manageLive', 'autoStartLive', 'livePort', 'liveHost', 'liveMode', 'liveBaseDir', 'liveStartTimeoutSec',
   'speak', 'ttsVoice', 'ttsRate', 'ttsPitch',
@@ -65,6 +69,13 @@ const DEFAULTS = {
   sceneEnabled: false,
   /** 背景图路径（留空 = 用插件自带的 bg/scene.jpg） */
   sceneImage: '',
+  /**
+   * 背景窗口「最小化」：直播场景仍然生效，但把背景图 + 弹幕池 + 点歌台 + 数据面板收起来，
+   * 窗口缩回只留宠物。想彻底关掉背景就把 sceneEnabled 设成 false。
+   */
+  sceneMinimized: false,
+  /** 宠物自己的名字（气泡落款、弹幕池署名） */
+  petName: '大肥鲸',
   /** 宠物对话气泡字号（直播要看得清） */
   bubbleFontSize: 20,
   /** 场景里弹幕池的字号 */
@@ -177,6 +188,35 @@ const DEFAULTS = {
   ttsVoice: 'zh-CN-XiaoxiaoNeural',
   ttsRate: '+4%',
   ttsPitch: '+3Hz',
+  /**
+   * 自定义动作：{ id, label, emotion, sec, fx }，和内置动作库（POSES）合并。
+   * emotion 只能是 9 种帧序列之一；fx 取 none|squash|firework|shake|spin|hop。
+   */
+  posesCustom: [],
+  /**
+   * 双智能体：主播（A，就是这只鲸鱼）和另一只 AI（B）连麦聊天/抬杠，观众弹幕可以插话。
+   * B 默认共用同一个 DSH profile，但用自己的会话和人设；把 profileB 填上就换成另一个 profile。
+   */
+  multiAgent: {
+    enabled: false,
+    /** argue = 互相抬杠，chat = 一起聊 */
+    mode: 'argue',
+    nameB: '小海豚',
+    /** 留空 = 用内置的「抬杠搭子」人设 */
+    personaB: '',
+    /** 留空 = 跟主宠物同一个 DSH profile，仅会话隔离 */
+    profileB: '',
+    /** 两句之间歇多久 */
+    turnGapSec: 3,
+    /** 一波最多来回几轮 */
+    roundsPerBurst: 8,
+    /** 一波聊完歇多久再开下一波 */
+    quietSec: 60,
+    /** 弹幕静默多久之后自己聊起来 */
+    idleStartSec: 45,
+    /** 观众弹幕可以插话（排队优先，默认开） */
+    audienceJoin: true,
+  },
 }
 
 /* ------------------------------------------------------------------ config */
@@ -190,7 +230,14 @@ function loadConfig() {
       writeFileSync(CONFIG_FILE, JSON.stringify(DEFAULTS, null, 2), 'utf8')
     } catch { /* read-only install: defaults only */ }
   }
-  return { ...DEFAULTS, ...(fileConfig && typeof fileConfig === 'object' ? fileConfig : {}) }
+  const merged = { ...DEFAULTS, ...(fileConfig && typeof fileConfig === 'object' ? fileConfig : {}) }
+  // 嵌套对象要逐字段合并，否则老配置文件会把新加的字段吃掉
+  merged.multiAgent = {
+    ...DEFAULTS.multiAgent,
+    ...(fileConfig && typeof fileConfig.multiAgent === 'object' && fileConfig.multiAgent ? fileConfig.multiAgent : {}),
+  }
+  if (!Array.isArray(merged.posesCustom)) merged.posesCustom = []
+  return merged
 }
 
 /* -------------------------------------------------------------------- log */
@@ -570,6 +617,35 @@ const DEFAULT_PERSONA = [
   '你只有只读权限：能查系统状态、读文件、联网搜索（web_search_cn）、管点歌台（song_request / song_skip）；改不了电脑上的东西，被要求改就说改不了。',
 ].join('\\n')
 
+/** 双智能体里 B 的默认人设：一个专门跟鲸鱼抬杠的搭子。 */
+const DEFAULT_RIVAL_PERSONA = [
+  '你是「小海豚」，大肥鲸的搭档，同一直播间连麦。',
+  '说话短、损、机灵，一句一个意思，尽量不超过 25 字，别念稿；不用 Markdown、列表、表情符号。',
+  '你嘴上不让人，但只怼观点不怼人，不骂人、不开黄腔、不贬低任何群体。',
+].join('\n')
+
+/**
+ * 动作库：帧序列只有 9 种情绪，所以「动作」= 情绪 + 时长 + 一点特效，
+ * 由右键菜单或设置页主动触发（POST /dsh-live-pet/pose）。
+ * fx: none | squash（挤压回弹）| firework（头顶烟花）| shake（左右抖）| spin（转个身）| hop（蹦一下）
+ */
+const POSES = [
+  { id: 'wave', label: '挥挥手', emotion: 'happy', sec: 4, fx: 'squash' },
+  { id: 'bow', label: '鞠躬道谢', emotion: 'mischievous', sec: 4, fx: 'none' },
+  { id: 'sofa', label: '躺沙发看电视', emotion: 'tv', sec: 12, fx: 'none' },
+  { id: 'eat', label: '吃点东西', emotion: 'eating', sec: 8, fx: 'none' },
+  { id: 'cook', label: '去做饭', emotion: 'cooking', sec: 8, fx: 'none' },
+  { id: 'code', label: '敲电脑', emotion: 'coding', sec: 8, fx: 'none' },
+  { id: 'cry', label: '哭给你看', emotion: 'crying', sec: 6, fx: 'none' },
+  { id: 'angry', label: '生气了', emotion: 'unhappy', sec: 6, fx: 'shake' },
+  { id: 'dance', label: '扭两下', emotion: 'happy', sec: 8, fx: 'spin' },
+  { id: 'firework', label: '放个烟花', emotion: 'happy', sec: 5, fx: 'firework' },
+  { id: 'hop', label: '蹦一下', emotion: 'mischievous', sec: 4, fx: 'hop' },
+  { id: 'nap', label: '打个盹', emotion: 'tv', sec: 20, fx: 'none' },
+  { id: 'stroll', label: '溜达一圈', emotion: 'walking', sec: 10, fx: 'none' },
+]
+const POSE_FX = ['none', 'squash', 'firework', 'shake', 'spin', 'hop']
+
 const WELCOME_BATCH_MS = 2500
 const WELCOME_MAX_NAMES = 5
 
@@ -730,6 +806,10 @@ export function apply(ctx) {
     lastError: '',
     session: '',
     actionName: '',
+    /** 正在表演的动作（{id,label,emotion,sec,fx}）；没有就是 null */
+    pose: null,
+    /** 这句话是谁说的：主宠物 / B / 观众 */
+    speaker: '',
     live: {},
     pool: [],
   }
@@ -1004,6 +1084,49 @@ export function apply(ctx) {
     Object.assign(state, update, { seq: state.seq + 1, at: Date.now() })
   }
 
+  /** 内置动作 + 用户自定义动作（config.posesCustom，设置页可加）。 */
+  function poseList() {
+    const custom = (Array.isArray(config.posesCustom) ? config.posesCustom : [])
+      .filter((pose) => pose && typeof pose === 'object')
+      .map((pose, index) => ({
+        id: String(pose.id || `custom${index + 1}`).slice(0, 24),
+        label: String(pose.label || pose.id || `自定义动作${index + 1}`).slice(0, 20),
+        emotion: EMOTIONS.includes(String(pose.emotion || '')) ? String(pose.emotion) : 'happy',
+        sec: Math.max(1, Math.min(120, Number(pose.sec) || 6)),
+        fx: POSE_FX.includes(String(pose.fx || '')) ? String(pose.fx) : 'none',
+      }))
+    return [...POSES, ...custom]
+  }
+
+  /** 主动触发一个动作：右键菜单 / 设置页 / HTTP 都走这里。 */
+  function performPose(rawId) {
+    const id = String(rawId || '').trim()
+    const pose = poseList().find((item) => item.id === id)
+    if (!pose) return { ok: false, error: `没有这个动作：${id || '(空)'}` }
+    const who = String(config.petName || '大肥鲸')
+    bump({
+      status: 'acting',
+      emotion: pose.emotion,
+      actionName: pose.id,
+      pose: { ...pose },
+      say: '',
+      audioPath: '',
+      audioDuration: 0,
+      speaker: who,
+      lastError: '',
+    })
+    pushPool({ kind: 'pose', user: who, text: pose.label })
+    log(`pose ${pose.id} -> ${pose.emotion} ${pose.sec}s fx=${pose.fx}`)
+    lastActivity = Date.now()
+    const seqAt = state.seq
+    setTimeout(() => {
+      if (state.seq !== seqAt) return // 期间有新台词/动作，别抢镜头
+      bump({ status: 'idle', actionName: '', pose: null, emotion: 'walking' })
+      log(`pose ${pose.id} ended -> walking`)
+    }, pose.sec * 1000)
+    return { ok: true, pose }
+  }
+
 /* ------------------------------------------------------------------ 固定话术
  * 点赞 / 关注 / 进房这类高频事件不该等模型：直接合成语音 + 气泡，串行执行，
  * 不与正常回合抢麦。
@@ -1150,9 +1273,54 @@ function addFastEnter(name) {
     '{"say":"可以直接朗读的一两句中文，不要表情符号","emotion":"happy|mischievous|crying|unhappy|eating|cooking|coding|tv|walking","action":"none|gift:礼物名"}',
   ].join('\n')
 
-  async function runTurn(bullet) {
+  /** 双智能体：slot='a' 是主宠物本身，'b' 是连麦搭子。 */
+  function agentFor(slot) {
+    const team = config.multiAgent || {}
+    if (slot === 'b') {
+      return {
+        slot: 'b',
+        name: String(team.nameB || '小海豚').slice(0, 16),
+        key: String(team.sessionKeyB || `${config.sessionKey}-b`),
+        profile: String(team.profileB || config.profile),
+        persona: String(team.personaB || '').trim(),
+      }
+    }
+    return {
+      slot: 'a',
+      name: String(config.petName || '大肥鲸').slice(0, 16),
+      key: String(config.sessionKey || 'live-pet'),
+      profile: config.profile,
+      persona: String(config.persona || '').trim(),
+    }
+  }
+
+  /** 连麦提示词：接住对方上一句，或者先开个头。 */
+  function banterPromptFor(agent, bullet) {
+    const team = config.multiAgent || {}
+    const other = agentFor(agent.slot === 'b' ? 'a' : 'b')
+    const stance = String(team.mode || 'argue') === 'chat'
+      ? '你俩是搭子闲聊：顺着对方的话题接，补细节、接梗、抛个新的小问题，别一直反问。'
+      : '你俩互相抬杠：对方说什么都怼回去，抓漏洞、唱反调、嘴硬到底；但不许骂人、不许人身攻击、不许贬低任何群体。'
+    const lines = [`你在跟「${other.name}」连麦，观众在听着。`, stance]
+    if (bullet.opening === true) {
+      lines.push('这一轮你先开口：抛一句能聊起来的话（直播间的、你正在干的事、或者一个离谱观点都行），一句话说完。')
+    } else {
+      lines.push(`对方「${other.name}」刚说：「${String(bullet.otherLine || '').slice(0, 120)}」`)
+      lines.push('接住这句，一句话，别复读对方的原话。')
+    }
+    if (String(bullet.audienceText || '') !== '') {
+      lines.push(`正好有观众插话：<弹幕 user="${String(bullet.audienceUser || '观众').slice(0, 24)}">${String(bullet.audienceText).slice(0, 160)}</弹幕>`)
+      lines.push('先短一句回观众，再顺带接/怼对方一句。')
+    }
+    lines.push('只输出一行 JSON，不要代码块、不要多余解释：')
+    lines.push('{"say":"可以直接朗读的一两句话，不要表情符号","emotion":"happy|mischievous|crying|unhappy|eating|cooking|coding|tv|walking","action":"none"}')
+    return lines.join('\n')
+  }
+
+  async function runTurn(bullet, agent) {
     if (!dsh.ok) throw new Error(dsh.reason)
-    const key = config.sessionKey
+    const me = agent || agentFor('a')
+    const key = me.key
     let record = readSession(key)
     const ttlMs = Math.max(0.5, Number(config.sessionTtlHours) || 12) * 3600 * 1000
     if (record && Date.now() - Number(record.created || 0) > ttlMs) {
@@ -1163,7 +1331,9 @@ function addFastEnter(name) {
     const facts = liveFacts(state.live)
     const header = facts === '' ? '' : `【本场真实数据】${facts}`
     let prompt
-    if (bullet.idle === true) {
+    if (bullet.banter === true) {
+      prompt = [header, banterPromptFor(me, bullet)].filter(Boolean).join('\n')
+    } else if (bullet.idle === true) {
       prompt = [header, '【冷场】', idlePrompt].filter(Boolean).join('\n')
     } else if (bullet.gift) {
       prompt = [
@@ -1194,13 +1364,14 @@ function addFastEnter(name) {
 
     // 人设走每轮提示词：DSH 的 agent 预设会整体接管系统提示，profile 里的
     // personaPrefix 到不了模型，所以这里把它作为最优先的一段塞进消息。
-    const customPersona = String(config.persona || '').trim()
-    const personaText = customPersona !== '' ? customPersona : DEFAULT_PERSONA
+    const customPersona = String(me.persona || '').trim()
+    const fallbackPersona = me.slot === 'b' ? DEFAULT_RIVAL_PERSONA : DEFAULT_PERSONA
+    const personaText = customPersona !== '' ? customPersona : fallbackPersona
     const personaLabel = customPersona !== '' ? '老板设定的人设' : '你的人设'
     prompt = `【${personaLabel}（最高优先，和别的设定冲突时以此为准；不要向观众念这段）】\n${personaText}\n\n${prompt}`
 
     const attempt = async (sessionId) => {
-      const args = [dsh.bin, config.profile, '--json']
+      const args = [dsh.bin, me.profile, '--json']
       if (sessionId) args.push('--session-id', sessionId)
       args.push(prompt)
       const env = { DSH_TELEMETRY_DISABLED: '1' }
@@ -1372,11 +1543,12 @@ function addFastEnter(name) {
     }
   }
 
-  async function handle(bullet) {
+  async function handle(bullet, agent) {
+    const me = agent || agentFor('a')
     lastActivity = Date.now()
-    bump({ status: 'thinking', user: bullet.user, kind: bullet.kind, say: '', audioPath: '', audioDuration: 0 })
+    bump({ status: 'thinking', user: me.slot === 'b' ? me.name : bullet.user, kind: bullet.kind, say: '', audioPath: '', audioDuration: 0, speaker: '' })
     try {
-      const answer = await runTurn(bullet)
+      const answer = await runTurn(bullet, me)
       // Emotion choreography: the pet's body follows what it is doing, not just the words.
       let emotion = answer.emotion
       let actionName = ''
@@ -1411,14 +1583,16 @@ function addFastEnter(name) {
         audioPath: speech ? speech.path : '',
         audioDuration: speech ? speech.duration : 0,
         lastError: '',
+        speaker: me.name,
         turns: state.turns + 1,
       })
-      const label = bullet.idle === true ? 'idle talk'
-        : bullet.welcome === true ? `welcome (${bullet.user})`
-          : bullet.gift ? `gift thanks (${bullet.user}: ${bullet.gift})`
-            : `reply (${bullet.user})`
+      const label = bullet.banter === true ? `banter (${me.name})`
+        : bullet.idle === true ? 'idle talk'
+          : bullet.welcome === true ? `welcome (${bullet.user})`
+            : bullet.gift ? `gift thanks (${bullet.user}: ${bullet.gift})`
+              : `reply (${bullet.user})`
       log(`${label}: ${emotion} | ${answer.say}`)
-      pushPool({ kind: 'me', user: '大肥鲸', text: answer.say })
+      pushPool({ kind: me.slot === 'b' ? 'agent-b' : 'me', user: me.name, text: answer.say })
       void runAction(answer.action, bullet)
       if (poseSec > 0) {
         // The pose is a break, not a permanent state: go back to walking unless
@@ -1431,11 +1605,113 @@ function addFastEnter(name) {
           }
         }, poseSec * 1000)
       }
+      // 双智能体：观众这条弹幕答完之后，让 B 接着接一句（设置里 audienceJoin 控制）
+      if (multiAgentOn() && config.multiAgent.audienceJoin !== false && bullet.banter !== true && bullet.idle !== true && state.say !== '') {
+        banter.lastLine = answer.say
+        banter.audience = { user: String(bullet.user || '观众'), text: String(bullet.text || '') }
+        banter.speaker = 'b'
+        if (banter.round === 0) banter.round = 1
+        // 有观众说话就别继续歇着了：B 马上接一句
+        banter.quietUntil = 0
+        scheduleBanter(2500)
+      }
+      return answer
     } catch (error) {
       const message = String(error && error.message ? error.message : error)
       bump({ status: 'idle', lastError: message })
       log(`turn failed: ${message}`)
+      return null
     }
+  }
+
+  /* ---- 双智能体连麦（A = 主宠物，B = 搭子） ---------------------------- */
+
+  const banter = {
+    timer: null,
+    speaker: 'a',      // 下一句轮到谁
+    round: 0,          // 本波第几轮
+    lastLine: '',
+    lastAt: 0,
+    quietUntil: 0,
+    audience: null,    // 观众刚插的话，下一句顺手带上
+  }
+
+  function multiAgentOn() {
+    return Boolean(config.multiAgent && config.multiAgent.enabled === true)
+  }
+
+  function scheduleBanter(delayMs) {
+    if (banter.timer) {
+      clearTimeout(banter.timer)
+      banter.timer = null
+    }
+    if (!multiAgentOn() || !alive) return
+    const delay = Math.max(1000, Number(delayMs) || 4000)
+    banter.timer = setTimeout(() => {
+      banter.timer = null
+      void banterTick()
+    }, delay)
+  }
+
+  async function banterTick() {
+    if (!multiAgentOn() || !alive) return
+    const team = config.multiAgent || {}
+    const now = Date.now()
+    if (state.status === 'offline') {
+      scheduleBanter(10000)
+      return
+    }
+    // 弹幕优先：正在回话 / 队列里还有活 / 正在敲工具，都让位
+    if (running || queue.length > 0 || state.status === 'thinking') {
+      scheduleBanter(4000)
+      return
+    }
+    if (now < banter.quietUntil) {
+      scheduleBanter(banter.quietUntil - now + 1000)
+      return
+    }
+    // 一波聊完歇一会儿再开下一波
+    const maxRounds = Math.max(2, Number(team.roundsPerBurst) || 8)
+    if (banter.round >= maxRounds) {
+      banter.round = 0
+      const quietSec = Math.max(10, Number(team.quietSec) || 60)
+      banter.quietUntil = now + quietSec * 1000
+      log(`banter burst finished (${maxRounds} 轮), quiet for ${quietSec}s`)
+      scheduleBanter(quietSec * 1000 + 1000)
+      return
+    }
+    // 冷场够久才开始；有人说话（弹幕/老板）就等着
+    const idleNeed = Math.max(0, Number(team.idleStartSec) || 45) * 1000
+    if (banter.round === 0 && now - lastActivity < idleNeed) {
+      scheduleBanter(Math.min(15000, Math.max(3000, idleNeed - (now - lastActivity))))
+      return
+    }
+
+    const slot = banter.speaker === 'b' ? 'b' : 'a'
+    const me = agentFor(slot)
+    const other = agentFor(slot === 'b' ? 'a' : 'b')
+    const opening = banter.round === 0
+    const audience = banter.audience
+    banter.audience = null
+    const bullet = {
+      kind: 'banter',
+      banter: true,
+      user: other.name,
+      text: '',
+      opening,
+      otherLine: opening ? '' : banter.lastLine,
+      audienceText: audience ? String(audience.text || '') : '',
+      audienceUser: audience ? String(audience.user || '') : '',
+    }
+    log(`banter: ${me.name}${opening ? ' opens' : ` answers ${other.name}`}${audience ? ` (观众 ${audience.user}: ${String(audience.text).slice(0, 30)})` : ''}`)
+    const answer = await handle(bullet, me)
+    if (answer && answer.say) {
+      banter.lastLine = answer.say
+      banter.round += 1
+    }
+    banter.speaker = slot === 'b' ? 'a' : 'b'
+    banter.lastAt = Date.now()
+    scheduleBanter((Math.max(1, Number(team.turnGapSec) || 3) * 1000) + 500)
   }
 
   async function drain() {
@@ -1684,9 +1960,13 @@ function addFastEnter(name) {
 
   function scenePayload() {
     const enabled = config.sceneEnabled === true
+    const minimized = enabled && config.sceneMinimized === true
     const rect = screenWorkArea()
     return {
       enabled,
+      // full = 铺满全屏的直播场景；minimal = 背景层收起来只留宠物；off = 没开背景
+      display: enabled ? (minimized ? 'minimal' : 'full') : 'off',
+      minimized,
       bubbleFontSize: Math.max(10, Math.min(60, Number(config.bubbleFontSize) || 20)),
       poolFontSize: Math.max(10, Math.min(60, Number(config.poolFontSize) || 20)),
       imageUrl: enabled && sceneImagePath() !== '' ? '/dsh-live-pet/scene/bg?t=' + Math.round(Date.now() / 60000) : '',
@@ -2024,6 +2304,18 @@ function addFastEnter(name) {
             writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8')
             result.petSaved = true
             log('plugin config updated from the settings page')
+            if (Object.prototype.hasOwnProperty.call(body.pet, 'sceneMinimized')) {
+              log('scene window: ' + (config.sceneMinimized === true ? 'minimized (只留宠物)' : 'full (全屏背景)') + ' / sceneEnabled=' + (config.sceneEnabled === true))
+            }
+            // 双智能体开关/配置变了：立刻重排连麦节奏
+            if (Object.prototype.hasOwnProperty.call(body.pet, 'multiAgent') || Object.prototype.hasOwnProperty.call(body.pet, 'petName')) {
+              banter.round = 0
+              banter.quietUntil = 0
+              banter.speaker = 'a'
+              banter.lastLine = ''
+              scheduleBanter(2000)
+              log('multi-agent settings updated: ' + (multiAgentOn() ? `on (A=${agentFor('a').name} / B=${agentFor('b').name})` : 'off'))
+            }
             if (Object.prototype.hasOwnProperty.call(body.pet, 'persona')) {
               const rebuilt = ensurePetProfile(config)
               result.profileRebuilt = rebuilt.ok === true
@@ -2089,7 +2381,17 @@ function addFastEnter(name) {
           speaking: state.audioPath !== '' && Date.now() - state.at < Math.max(2000, state.audioDuration * 1000 + 1500),
           // 直播场景：背景图、字号、宠物可活动范围（屏幕坐标）
           scene: scenePayload(),
-          config: { speak: config.speak, petSilent: config.petSilent, profile: config.profile, appUrl: appBase(), manageLive: config.manageLive === true, livePort: config.livePort },
+          config: {
+            speak: config.speak,
+            petSilent: config.petSilent,
+            profile: config.profile,
+            appUrl: appBase(),
+            manageLive: config.manageLive === true,
+            livePort: config.livePort,
+            petName: String(config.petName || '大肥鲸'),
+            multiAgent: multiAgentOn(),
+            agentB: multiAgentOn() ? agentFor('b').name : '',
+          },
     // 宠物窗口每轮都读这段：改了设置立刻生效，不用重开窗口
     wander: {
       enabled: config.wander !== false,
@@ -2198,6 +2500,21 @@ function addFastEnter(name) {
           .catch((error) => sendJson(res, { ok: false, error: String(error && error.message ? error.message : error), state }))
         return
       }
+      /* ---- 动作库：右键菜单 / 设置页共用 ------------------------------- */
+      if (pathname === '/dsh-live-pet/poses') {
+        sendJson(res, { ok: true, poses: poseList() })
+        return
+      }
+      if (pathname === '/dsh-live-pet/pose') {
+        let id = searchParams.get('id') || ''
+        if (id === '' && req.method === 'POST') {
+          const body = await readJsonBody(req, 8192)
+          id = body && typeof body.id === 'string' ? body.id : ''
+        }
+        const result = performPose(id)
+        sendJson(res, result)
+        return
+      }
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
       res.end('not found')
     },
@@ -2211,7 +2528,8 @@ function addFastEnter(name) {
     idleTimer = setTimeout(async () => {
       try {
         const gap = Number(config.idleEverySec) || 150
-        if (config.idleChat && !running && state.status !== 'offline' && Date.now() - lastActivity >= gap * 1000) {
+        // 双智能体开启时由 banter 负责自说自话，别再让 A 单独插一句
+        if (config.idleChat && !multiAgentOn() && !running && state.status !== 'offline' && Date.now() - lastActivity >= gap * 1000) {
           lastActivity = Date.now()
           log(`idle for ${Math.round(gap)}s, talking on its own`)
           await handle({ user: '主播', text: '', kind: 'idle', idle: true })
@@ -2237,6 +2555,10 @@ function addFastEnter(name) {
     }
     schedule()
     if (config.idleChat) scheduleIdle()
+    if (multiAgentOn()) {
+      log(`multi-agent on: A=${agentFor('a').name} (${agentFor('a').profile}) / B=${agentFor('b').name} (${agentFor('b').profile}) mode=${String(config.multiAgent.mode || 'argue')}`)
+      scheduleBanter(3000)
+    }
     if (config.autoStartPet) startPet()
     closeScene()
     return () => {
@@ -2245,6 +2567,8 @@ function addFastEnter(name) {
       timer = null
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = null
+      if (banter.timer) clearTimeout(banter.timer)
+      banter.timer = null
       stopPet()
       closeScene()
       if (config.manageLive === true) void stopLive()
