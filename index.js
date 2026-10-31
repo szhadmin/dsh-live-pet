@@ -1558,7 +1558,7 @@ function addFastEnter(name) {
               continue
             }
             if (kind === 'follow') {
-              pushPool({ kind: 'follow', user, text: '' })
+              pushPool({ kind: 'follow', user, text: '关注了直播间' })
               if (config.thanksFollow === true) {
                 const tpl = String(config.followLine || '谢谢 {user} 关注，么么哒～')
                 void speakFixed(tpl.replace('{user}', shortName(user) || user), 'happy')
@@ -1566,7 +1566,7 @@ function addFastEnter(name) {
               continue
             }
             if (kind === 'like') {
-              pushPool({ kind: 'like', user, text: '' })
+              pushPool({ kind: 'like', user, text: '点了赞' })
               if (config.thanksLike === true) addLikeThanks(shortName(user) || user)
               continue
             }

@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+﻿﻿#Requires -Version 5.1
 <#
     小鲸鱼直播宠物 —— DSH 插件 dsh-live-pet 的"身体"。
 
@@ -23,7 +23,7 @@ $script:LogFile = Join-Path $script:Root 'pet-window.log'
 $script:FrameSize = 240
 $script:ScaleSteps = @(0.6, 0.85, 1.1, 1.35)
 $script:Scale = 0.75
-$script:BubbleArea = 96
+$script:BubbleArea = 190
 $script:Silent = ($env:PET_SILENT -eq '1')
 
 function Write-PetLog([string]$Message) {
@@ -80,15 +80,15 @@ $script:Bubble.Background = [System.Windows.Media.SolidColorBrush]::new([System.
 $script:Bubble.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(120, 120, 200, 240))
 $script:Bubble.BorderThickness = [System.Windows.Thickness]::new(1)
 $script:Bubble.CornerRadius = [System.Windows.CornerRadius]::new(12)
-$script:Bubble.Padding = [System.Windows.Thickness]::new(10, 7, 10, 7)
+$script:Bubble.Padding = [System.Windows.Thickness]::new(14, 10, 14, 10)
 $script:Bubble.HorizontalAlignment = 'Center'
 $script:Bubble.VerticalAlignment = 'Bottom'
 $script:Bubble.Visibility = 'Collapsed'
 
 $script:BubbleText = New-Object System.Windows.Controls.TextBlock
 $script:BubbleText.Foreground = [System.Windows.Media.Brushes]::White
-$script:BubbleText.FontSize = 13
-$script:BubbleText.LineHeight = 20
+$script:BubbleText.FontSize = 21
+$script:BubbleText.LineHeight = 31
 $script:BubbleText.TextWrapping = 'Wrap'
 $script:BubbleText.TextAlignment = 'Center'
 $script:Bubble.Child = $script:BubbleText
@@ -105,8 +105,8 @@ $script:InputBorder.VerticalAlignment = 'Bottom'
 $script:InputBorder.Visibility = 'Collapsed'
 
 $script:Box = New-Object System.Windows.Controls.TextBox
-$script:Box.Width = 236
-$script:Box.FontSize = 13
+$script:Box.Width = 280
+$script:Box.FontSize = 18
 $script:Box.BorderThickness = [System.Windows.Thickness]::new(0)
 $script:Box.Background = [System.Windows.Media.Brushes]::Transparent
 $script:Box.Foreground = [System.Windows.Media.Brushes]::White
@@ -165,7 +165,7 @@ $script:Board.VerticalAlignment = [System.Windows.VerticalAlignment]::Bottom
 $script:Board.Width = $script:BoardWidth
 $script:BoardText = New-Object System.Windows.Controls.TextBlock
 $script:BoardText.Foreground = [System.Windows.Media.Brushes]::White
-$script:BoardText.FontSize = 12
+$script:BoardText.FontSize = 16
 $script:BoardText.LineHeight = 18
 $script:BoardText.TextWrapping = [System.Windows.TextWrapping]::Wrap
 $script:BoardText.Text = '点歌台'
@@ -195,7 +195,7 @@ $script:PoolPanel.Margin = [System.Windows.Thickness]::new(28, 26, 0, 0)
 $script:PoolPanel.Width = 600
 $script:PoolPanel.Visibility = 'Collapsed'
 # 弹幕池：一行一个 TextBlock，按类型上色，越旧越淡
-$script:PoolFontSize = 20
+$script:PoolFontSize = 26
 $script:PoolSignature = ''
 $script:PoolRows = New-Object System.Windows.Controls.StackPanel
 $script:PoolRows.VerticalAlignment = 'Bottom'
@@ -206,7 +206,7 @@ $script:PoolScroll.Content = $script:PoolRows
 $script:PoolTitle = New-Object System.Windows.Controls.TextBlock
 $script:PoolTitle.Text = '弹幕池'
 $script:PoolTitle.Foreground = [System.Windows.Media.Brushes]::White
-$script:PoolTitle.FontSize = 20
+$script:PoolTitle.FontSize = 26
 $script:PoolTitle.FontWeight = 'Bold'
 $script:PoolTitle.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
 $script:PoolHost = New-Object System.Windows.Controls.StackPanel
@@ -227,7 +227,7 @@ $script:SongPanel.Width = 360
 $script:SongPanel.Visibility = 'Collapsed'
 $script:SongText = New-Object System.Windows.Controls.TextBlock
 $script:SongText.Foreground = [System.Windows.Media.Brushes]::White
-$script:SongText.FontSize = 18
+$script:SongText.FontSize = 22
 $script:SongText.LineHeight = 27
 $script:SongText.TextWrapping = [System.Windows.TextWrapping]::Wrap
 # 当前播放进度条
@@ -250,7 +250,7 @@ $script:SongFill.Fill = New-Object System.Windows.Media.LinearGradientBrush(
 $script:SongTrack.Child = $script:SongFill
 $script:SongClock = New-Object System.Windows.Controls.TextBlock
 $script:SongClock.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(180, 234, 242, 255))
-$script:SongClock.FontSize = 14
+$script:SongClock.FontSize = 18
 $script:SongClock.Margin = [System.Windows.Thickness]::new(0, 6, 0, 0)
 $script:SongHost = New-Object System.Windows.Controls.StackPanel
 [void]$script:SongHost.Children.Add($script:SongText)
@@ -272,7 +272,7 @@ $script:StatsPanel.Width = 300
 $script:StatsPanel.Visibility = 'Collapsed'
 $script:StatsText = New-Object System.Windows.Controls.TextBlock
 $script:StatsText.Foreground = [System.Windows.Media.Brushes]::White
-$script:StatsText.FontSize = 16
+$script:StatsText.FontSize = 20
 $script:StatsText.LineHeight = 25
 $script:StatsText.TextWrapping = [System.Windows.TextWrapping]::Wrap
 $script:StatsPanel.Child = $script:StatsText

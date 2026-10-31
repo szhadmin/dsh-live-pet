@@ -163,6 +163,36 @@ def snapshot() -> dict:
         data["douyin"] = douyin.status()
         data["music"] = dict(STATE["music"])
         data["music_queue"] = songs.JUKEBOX.status()
+        # 点歌台当前歌曲镜像到 music：宠物/舞台都读这个字段，不镜像就以为没在放歌
+        _jq = data["music_queue"] if isinstance(data["music_queue"], dict) else {}
+        _cur = _jq.get("current") if _jq.get("playing") else None
+        if isinstance(_cur, dict) and _cur.get("url"):
+            try:
+                _vol = float((cfg.get("songs") or {}).get("volume", 0.55))
+            except (TypeError, ValueError):
+                _vol = 0.55
+            _sid = _cur.get("seq")
+            if not isinstance(_sid, int):
+                try:
+                    _sid = int(float(_sid or 0))
+                except (TypeError, ValueError):
+                    _sid = 0
+            try:
+                _dur = float(_cur.get("duration") or 0)
+            except (TypeError, ValueError):
+                _dur = 0.0
+            data["music"] = {
+                "id": _sid,
+                "playing": True,
+                "title": str(_cur.get("title") or "")[:80],
+                "url": str(_cur.get("url") or ""),
+                "user": str(_cur.get("user") or ""),
+                "gift": str(_cur.get("gift") or ""),
+                "duration": _dur,
+                "seq": _sid,
+                "volume": _vol,
+            }
+
         data["tool_catalog"] = tools.CATALOG
         data["tools_on"] = bool((cfg.get("tools") or {}).get("enable", True))
         idle_cfg = cfg.get("idle") or {}
