@@ -12,7 +12,12 @@
 - **人设可换**：在 DSH 设置里写一段系统提示词，它就不是鲸鱼了（想让它叫「阿獭」也行）
 - **自己溜达**：会在桌面各处走动（带走路动画和左右转身），走一会儿停一会儿；你一点/一拖/一打字它就自动让路
 - **直播场景**：一键铺一张背景图，左上角弹幕池、右上角点歌台，宠物只在这块背景里活动——单窗口，OBS 直接抓窗口即可
+- **背景三态**：全屏背景 / 最小化（只留宠物）/ 关闭，右键菜单和设置页都能一键切
+- **右键动作菜单**：13 个内置动作（敬礼/贴沙发/蹦一下/放烟花…）+ 自己写的自定义动作，点了当场演
+- **双智能体连麦**：主宠物和另一个 AI 在直播间抬杠（也可切成搭子闲聊），观众弹幕随时能插话
+- **只读查看 DSH**：能看 DSH 有几个 profile、多少条会话、最近聊了啥（只读，不改不跑命令）
 - 在 **DSH → 设置 → 直播宠物** 里统一配置
+- 也可以打成一个 **exe 双击就跑**，设置页跟着 exe 走（见「方式 C」）
 
 ## 让 AI 帮你装（复制给 AI 用）
 
@@ -99,6 +104,33 @@ git clone https://github.com/szhadmin/dsh-live-pet.git F:\douyinlive\dsh-live-pe
 > 用绝对路径还有额外好处：DSH 的客户端模块缓存按「模块名」记，路径式行名可以绕开它，
 > 装好刷新页面就能看到设置页，不必重启。
 
+## 方式 C：独立 exe（不装 DSH 插件也能跑）
+
+想「双击就有一只鲸鱼在桌面上」、不进 DSH 设置也能改配置，可以打成一个 exe：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-exe.ps1
+# 产物：dist\dsh-live-pet.exe（约 98MB，Node SEA 单文件）
+```
+
+exe 自带：宠物窗口脚本、全部帧图、直播服务代码，以及一份**本地设置页**。
+
+| 行为 | 说明 |
+| --- | --- |
+| 双击 exe | 起本地服务（默认 `127.0.0.1:8899`）+ 宠物窗口；直播服务按配置托管在 `8791` |
+| 再点一次 exe | 发现已在运行 → 只弹出设置页，不会开第二只宠物 |
+| 首次运行 | 资源解到 `%LOCALAPPDATA%\dsh-live-pet\app`，并自动打开设置页 |
+| 设置页 | 宠物 / 互动 / 模型 / 直播背景 / 动作 / 双智能体 / 直播服务 / 路径 / 其它 |
+| 配置位置 | `%LOCALAPPDATA%\dsh-live-pet\app\config.json`（字段与插件版一致，可以互拷） |
+| 日志 | `%LOCALAPPDATA%\dsh-live-pet\app.log`、`…\app\live-pet.log`、`…\app\pet-window.log` |
+| 退出 | 宠物右键菜单里的「退出」，或任务管理器结束 `dsh-live-pet.exe` |
+
+exe 版和插件版**共用同一套代码**（`index.js` + `pet.ps1`），区别只是宿主：
+插件版跑在 DSH 的 ctx 里，exe 版用 `app/main.js` 造了个最小的 ctx 垫片。
+两边配置互不影响（各读各的 `config.json`），也能同时开——不想撞车就关掉一边的宠物窗口。
+
+> exe 版仍然需要 **Python**（点歌/语音/弹幕）和 **DSH CLI**（宠物的大脑，在设置页「路径」里指过去）。
+> 只想看宠物在桌面上动、不接弹幕，把「由宠物托管直播服务」和「启动时自动起直播服务」关掉就行。
 ## 首次配置
 
 1. 打开 **设置 → 直播宠物**，「直播服务（插件托管）」默认已开。
@@ -186,6 +218,10 @@ profile/cordis.patch.tpl.yml  宠物 profile 模板（关掉写工具、禁用�
 frames/<情绪>/NNN.png         240×240 动图帧（9 种情绪，共 546 张，已压到约 7MB）
 live/                         内置的直播服务（app.py + core + vendor + web + defaults + requirements.txt）
 locale/                       设置页文案（中/英）
+app/main.js                   独立 exe 的宿主：最小 ctx 垫片 + 本地 HTTP + 打开设置窗口
+app/settings.html             独立 exe 的设置页（原生 JS，不依赖 DSH）
+scripts/build-exe.ps1         打 exe（esbuild → assets.zip → SEA blob → postject）
+scripts/deploy.ps1            部署到本机 profile；scripts/reload.ps1 热重载插件
 cordis.patch.yml              bundle patch
 ```
 
@@ -197,6 +233,9 @@ cordis.patch.yml              bundle patch
 | `GET|POST /dsh-live-pet/config` | 设置页读写配置（宠物配置 + 转发直播服务配置） |
 | `POST /dsh-live-pet/chat` | 窗口输入条发消息 |
 | `GET|POST /dsh-live-pet/live` | 托管直播服务的状态 / 启动 / 停止 / 重启 |
+| `GET /dsh-live-pet/poses` | 动作库（内置 13 个 + 自定义），右键菜单和设置页都用它 |
+| `POST|GET /dsh-live-pet/pose?id=` | 触发一个动作（表情 + 特效，到点自动还原） |
+| `GET /health` | 仅独立 exe：版本 / 资源目录 / 实例地址 |
 | `GET /dsh-live-pet/log`、`POST /reset`、`GET /selftest`、`GET /idle`、`GET /action` | 诊断与手动触发 |
 
 ## 已知限制
@@ -205,6 +244,9 @@ cordis.patch.yml              bundle patch
 - 同一时刻只处理一轮（保证长会话的上下文顺序）
 - 语音是 Edge-TTS 固定参数，情绪只靠 rate/pitch 微调，做不到"哽咽/撒娇"
 - 首次安装后必须重启一次 DSH 才能看到设置页
+- 独立 exe 版：宠物大脑仍是 DSH CLI，所以机器上得有 DSH（`dshBin` 指到 `…\@deepseek-ai\dsh\lib\bin.js`），
+  且首次运行会往 `~\.dsh\profiles\pet` 写 profile——这个目录必须可写
+- exe 版和插件版同时开会有两只宠物窗口抢桌面，建议只留一边
 - `frames` 约 26MB（546 张 PNG），仓库偏大
 
 ## 卸载

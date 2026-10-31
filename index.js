@@ -22,7 +22,20 @@ export const name = 'dsh-live-pet'
 /** The web server carries the pet's state route; everything else is optional. */
 export const inject = ['webServer']
 
-const PKG_DIR = fileURLToPath(new URL('./', import.meta.url))
+/**
+ * 数据/资源目录：
+ *  - 作为 DSH 插件跑：插件包自己的目录
+ *  - 作为独立 exe 跑：用 DSH_LIVE_PET_HOME 指到解包出来的资源目录
+ */
+const PKG_DIR = (() => {
+  const override = String(process.env.DSH_LIVE_PET_HOME || '').trim()
+  if (override !== '') return override.replace(/[\\/]+$/, '')
+  try {
+    return fileURLToPath(new URL('./', import.meta.url))
+  } catch {
+    return process.cwd()
+  }
+})()
 const FRAMES_DIR = join(PKG_DIR, 'frames')
 const PET_SCRIPT = join(PKG_DIR, 'pet.ps1')
 const CONFIG_FILE = join(PKG_DIR, 'config.json')
@@ -47,6 +60,9 @@ const PET_CONFIG_KEYS = [
   'posesCustom',
   'multiAgent',
   'mode', 'profile', 'manageProfile', 'appUrl', 'pollMs', 'replyKinds',
+  // 独立 exe 里这些必须能在设置页改：模型/密钥/各种可执行文件与目录
+  'provider', 'model', 'baseUrl', 'apiKey', 'apiKeyEnv',
+  'dshBin', 'nodeBin', 'pythonBin', 'workspace', 'audioDir', 'appPort',
   'manageLive', 'autoStartLive', 'livePort', 'liveHost', 'liveMode', 'liveBaseDir', 'liveStartTimeoutSec',
   'speak', 'ttsVoice', 'ttsRate', 'ttsPitch',
   'maxChars', 'chatMaxChars', 'maxPerMinute', 'minReplyGapMs', 'timeoutMs',
@@ -94,6 +110,8 @@ const DEFAULTS = {
    * the bundle runs and owns a private instance on `livePort` instead.
    */
   appUrl: 'http://127.0.0.1:8790',
+  /** 独立 exe 的设置页/接口端口（只有 app/main.js 用；插件里忽略） */
+  appPort: 8899,
   workspace: 'F:\\douyinlive',
   audioDir: 'F:\\douyinlive\\data\\audio',
   pythonBin: 'python',
@@ -501,7 +519,7 @@ async function synthesize(config, text) {
   const result = await runProcess(
     config.pythonBin,
     ['-c', TTS_SNIPPET, text, voice, rate, pitch],
-    { cwd: config.workspace, timeoutMs: 25000, env: { FATWHALE_BASE_DIR: (String(config.liveBaseDir || '').trim() || join(PKG_DIR, 'live-data')), PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } },
+    { cwd: spawnCwd(config), timeoutMs: 25000, env: { FATWHALE_BASE_DIR: (String(config.liveBaseDir || '').trim() || join(PKG_DIR, 'live-data')), PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } },
   )
   if (result.code !== 0) {
     log(`tts failed: ${(result.stderr || '').trim().split('\n').slice(-1)[0] || 'exit ' + result.code}`)
@@ -546,6 +564,18 @@ function resolveApiKey(config) {
       if (key !== '') return key
     } catch { /* try the next candidate */ }
   }
+  // 兜底：DSH 自己的 ~/.dsh/.env（独立 exe 没有 workspace 时靠它也能跑起来）
+  try {
+    const envFile = join(process.env.DSH_HOME || join(homedir(), '.dsh'), '.env')
+    const wanted = String(config.apiKeyEnv || 'BUDDYHUB_API_KEY')
+    for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+      if (!match) continue
+      if (match[1] !== wanted && match[1] !== 'BUDDYHUB_API_KEY') continue
+      const key = match[2].trim().replace(/^["']|["']$/g, '')
+      if (key !== '') return key
+    }
+  } catch { /* 没有 .env 就算了 */ }
   return ''
 }
 
@@ -586,6 +616,21 @@ function liveWorkspaceOf(config) {
   const bundled = join(PKG_DIR, 'live')
   if (existsSync(join(bundled, 'app.py'))) return bundled
   return String((config && config.workspace) || '')
+}
+
+/**
+ * 给子进程用的 cwd：配置的 workspace 存在就用它，否则退到自带 live 目录 / 包目录 / 用户目录。
+ * （cwd 传空字符串或不存在会让 node 子进程直接崩成 "Node.js v24.x" 那种一行报错。）
+ */
+function spawnCwd(config) {
+  const candidates = [config && config.workspace, liveWorkspaceOf(config), PKG_DIR, homedir()]
+  for (const dir of candidates) {
+    if (typeof dir !== 'string' || dir === '') continue
+    try {
+      if (statSync(dir).isDirectory()) return dir
+    } catch { /* 下一个 */ }
+  }
+  return undefined
 }
 
 /** 直播服务需要的 python 包（缺了就跑不起来）。 */
@@ -1381,7 +1426,7 @@ function addFastEnter(name) {
       const queryEmotion = String(config.queryEmotion || '')
       let sawTool = false
       const result = await runProcess(dsh.node, args, {
-        cwd: config.workspace,
+        cwd: spawnCwd(config),
         env,
         timeoutMs: Number(config.timeoutMs) || 30000,
         onStdout: (chunk) => {
@@ -1413,6 +1458,9 @@ function addFastEnter(name) {
     }
     if (out.code !== 0 || out.finalText === '') {
       const detail = (out.errorText || out.stderr || '').trim().split('\n').slice(-1)[0] || `exit ${out.code}`
+      const tail = (out.stderr || '').trim().slice(0, 1200)
+      // 出问题时把完整尾巴写日志，不然只剩一句 "Node.js v24.x" 没法排查
+      log(`turn stderr: code=${out.code} final=${out.finalText === ''} ${tail}`)
       throw new Error(detail.slice(0, 200))
     }
     if (out.sessionId) {

@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>直播宠物 · 设置</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b1220; --panel: #121a2b; --panel-2: #16203463; --line: #22304a;
+    --text: #e8eefb; --dim: #9fb0cc; --accent: #4ea1ff; --ok: #40d18a; --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: radial-gradient(1200px 600px at 20% -10%, #17253d, var(--bg));
+    color: var(--text); font: 14px/1.6 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 9; backdrop-filter: blur(8px);
+    background: #0b1220d9; border-bottom: 1px solid var(--line);
+    padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .5px; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .pill.ok { color: var(--ok); border-color: #2b5c44; }
+  .pill.err { color: var(--err); border-color: #5c2b2b; }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 20px 0; }
+  nav button {
+    background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  nav button.active { color: var(--text); border-color: var(--accent); background: #4ea1ff1f; }
+  main { padding: 16px 20px 60px; max-width: 1180px; }
+  section.card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  section.card > h2 { font-size: 14px; margin: 0 0 4px; }
+  .hint { color: var(--dim); font-size: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed #1d2942; }
+  .row:last-child { border-bottom: 0; }
+  .label { flex: 0 0 150px; color: #cfdcf3; }
+  input[type=text], input[type=number], select, textarea {
+    background: #0d1524; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 9px; font: inherit; min-width: 90px;
+  }
+  input[type=text] { flex: 1 1 220px; }
+  textarea { flex: 1 1 100%; min-height: 120px; line-height: 1.6; font-family: Consolas, monospace; font-size: 12.5px; }
+  input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  label.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  button {
+    background: #16233a; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 13px; cursor: pointer; font: inherit;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1b66c9; border-color: #2f7fe0; font-weight: 600; }
+  button.ghost { background: transparent; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  #toast {
+    position: fixed; right: 20px; bottom: 20px; max-width: 460px; padding: 10px 14px; border-radius: 10px;
+    background: #16233a; border: 1px solid var(--line); box-shadow: 0 8px 24px #0008; display: none; white-space: pre-wrap;
+  }
+  #toast.ok { border-color: #2b5c44; color: #b9f5d6; }
+  #toast.err { border-color: #5c2b2b; color: #ffc9c9; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+  .chip:hover { border-color: var(--accent); }
+  code { background: #0d1524; padding: 1px 6px; border-radius: 6px; font-size: 12px; }
+  .muted { color: var(--dim); }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>直播宠物 · 设置</h1>
+  <span class="pill" id="version">…</span>
+  <span class="pill" id="petState">宠物状态读取中</span>
+  <span class="pill" id="sceneState">背景：—</span>
+  <span class="pill" id="liveState">直播服务：—</span>
+  <span style="flex:1"></span>
+  <button class="ghost" id="refreshAll">刷新</button>
+</header>
+
+<nav id="tabs"></nav>
+<main id="main"></main>
+<div id="toast"></div>
+
+<script>
+'use strict'
+
+const state = { pet: null, live: null, liveOk: false, poses: [], configFile: '', activeTab: 'pet' }
+
+/* ------------------------------------------------------------------ 小工具 */
+const $ = (sel) => document.querySelector(sel)
+const el = (tag, props = {}, ...kids) => {
+  const node = document.createElement(tag)
+  for (const [key, value] of Object.entries(props)) {
+    if (key === 'class') node.className = value
+    else if (key === 'text') node.textContent = value
+    else if (key === 'html') node.innerHTML = value
+    else if (key.startsWith('on')) node.addEventListener(key.slice(2).toLowerCase(), value)
+    else if (value !== undefined && value !== null) node.setAttribute(key, value)
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue
+    node.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid)
+  }
+  return node
+}
+let toastTimer = null
+function toast(kind, text) {
+  const box = $('#toast')
+  box.className = kind
+  box.textContent = text
+  box.style.display = 'block'
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { box.style.display = 'none' }, kind === 'err' ? 9000 : 4000)
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options)
+  const text = await response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`返回的不是 JSON：${text.slice(0, 120)}`)
+  }
+}
+const postJson = (path, body) => api(path, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
+})
+
+/* ------------------------------------------------------------------ 字段定义 */
+const EMOTIONS = ['happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cooking', 'coding', 'tv', 'walking']
+const EMOTION_LABELS = {
+  happy: '开心', mischievous: '坏笑', crying: '哭', unhappy: '不高兴', eating: '吃东西',
+  cooking: '做饭', coding: '敲电脑', tv: '躺沙发看电视', walking: '走路',
+}
+const EMOTION_OPTIONS = EMOTIONS.map((value) => [value, `${EMOTION_LABELS[value]}（${value}）`])
+const FX_OPTIONS = [['none', '不动'], ['squash', '挤压'], ['firework', '放烟花'], ['shake', '抖一抖'], ['spin', '转个身'], ['hop', '蹦一下']]
+
+const SECTIONS = [
+  {
+    id: 'pet', title: '宠物', hint: '这些只影响宠物自己，保存后立刻生效。',
+    fields: [
+      { key: 'petName', label: '宠物名字', type: 'text', placeholder: '大肥鲸', hint: '弹幕池署名、气泡落款用' },
+      { key: 'profile', label: 'DSH profile', type: 'text', hint: 'pet = 插件生成的只读档' },
+      { key: 'mode', label: '对话模式', type: 'select', options: [['auto', 'auto 全自动'], ['takeover', 'takeover 接管'], ['mirror', 'mirror 镜像']] },
+      { key: 'persona', label: '人设', type: 'textarea', hint: '留空用内置人设；保存后会重建 pet profile，下一轮生效' },
+      { key: 'speak', label: '合成语音', type: 'bool' },
+      { key: 'chatEnabled', label: '接受打字聊天', type: 'bool' },
+      { key: 'petSilent', label: '静音启动', type: 'bool' },
+      { key: 'autoStartPet', label: '启动时自动开宠物窗口', type: 'bool' },
+      { key: 'maxChars', label: '弹幕回复字数', type: 'number', hint: '老板打字的回复上限见下一个' },
+      { key: 'chatMaxChars', label: '打字回复字数', type: 'number' },
+      { key: 'timeoutMs', label: '单轮超时（ms）', type: 'number' },
+    ],
+  },
+  {
+    id: 'interact', title: '互动', hint: '弹幕、进场、礼物的反应节奏。',
+    fields: [
+      { key: 'idleChat', label: '冷场自己找话题', type: 'bool' },
+      { key: 'idleEverySec', label: '冷场多少秒说一句', type: 'number' },
+      { key: 'welcomeEnter', label: '欢迎进场', type: 'bool' },
+      { key: 'welcomeEnterGapSec', label: '进场：批量窗口（秒）', type: 'number' },
+      { key: 'welcomeEnterPerHour', label: '进场：每小时上限', type: 'number' },
+      { key: 'welcomeEnterUserGapSec', label: '进场：同一人冷却（秒）', type: 'number' },
+      { key: 'thanksGift', label: '感谢礼物', type: 'bool' },
+      { key: 'giftThanksGapSec', label: '礼物：间隔（秒）', type: 'number' },
+      { key: 'giftThanksUserGapSec', label: '礼物：同一人冷却（秒）', type: 'number' },
+      { key: 'thanksFollow', label: '感谢关注', type: 'bool' },
+      { key: 'thanksLike', label: '感谢点赞', type: 'bool' },
+      { key: 'allowSkip', label: '允许切歌', type: 'bool' },
+      { key: 'skipCooldownSec', label: '切歌冷却（秒）', type: 'number' },
+      { key: 'maxPerMinute', label: '限流：条/分钟', type: 'number' },
+      { key: 'minReplyGapMs', label: '限流：最小间隔（ms）', type: 'number' },
+      { key: 'queryEmotion', label: '查东西时的情绪', type: 'select', options: EMOTION_OPTIONS },
+      { key: 'songEmotion', label: '点歌时的情绪', type: 'select', options: EMOTION_OPTIONS },
+      { key: 'giftForcedEmotion', label: '礼物固定表情', type: 'select', options: [['', '按礼物规则']].concat(EMOTION_OPTIONS) },
+      { key: 'giftPoseSec', label: '礼物表情持续（秒）', type: 'number' },
+      { key: 'actions', label: '允许点歌/礼物动作', type: 'bool' },
+      { key: 'stageGiftFx', label: '礼物特效转发给舞台', type: 'bool' },
+    ],
+  },
+]
+
+const TEAM_FIELDS = [
+  { key: 'enabled', label: '开启连麦', type: 'bool', hint: '让主宠物和另一个 AI 互相说话' },
+  { key: 'audienceJoin', label: '观众弹幕能插话', type: 'bool', hint: '弹幕优先，A 回完观众 B 再顺口接一句' },
+  { key: 'mode', label: '关系', type: 'select', options: [['argue', '互相抬杠（吵架）'], ['chat', '搭子闲聊']] },
+  { key: 'nameB', label: '对方名字', type: 'text', placeholder: '小海豚' },
+  { key: 'personaB', label: '对方人设', type: 'textarea', hint: '留空用内置「抬杠搭子」人设' },
+  { key: 'profileB', label: '对方 DSH profile', type: 'text', hint: '留空 = 跟主宠物同一个 profile，只隔离会话' },
+  { key: 'idleStartSec', label: '冷场多少秒开聊', type: 'number' },
+  { key: 'turnGapSec', label: '每句间隔（秒）', type: 'number' },
+  { key: 'roundsPerBurst', label: '一波最多几轮', type: 'number' },
+  { key: 'quietSec', label: '聊完歇多久（秒）', type: 'number' },
+]
+
+/* ------------------------------------------------------------------ 渲染器 */
+function fieldRow(field, value, onChange, hintOverride) {
+  const hint = hintOverride || field.hint
+  let control
+  if (field.type === 'bool') {
+    control = el('label', { class: 'check' },
+      el('input', { type: 'checkbox', checked: value === true, onchange: (event) => onChange(event.target.checked) }),
+      el('span', { text: '开' }))
+  } else if (field.type === 'select') {
+    control = el('select', { onchange: (event) => onChange(event.target.value) },
+      (field.options || []).map(([optionValue, label]) => el('option', { value: optionValue, text: label })))
+    control.value = value === undefined || value === null ? '' : String(value)
+  } else if (field.type === 'number') {
+    control = el('input', { type: 'number', value: value === undefined || value === null ? '' : String(value), onchange: (event) => onChange(event.target.value === '' ? '' : Number(event.target.value)) })
+  } else if (field.type === 'textarea') {
+    control = el('textarea', { placeholder: field.placeholder || '', onchange: (event) => onChange(event.target.value) })
+    control.value = value === undefined || value === null ? '' : String(value)
+  } else {
+    control = el('input', { type: 'text', value: value === undefined || value === null ? '' : String(value), placeholder: field.placeholder || '', oninput: (event) => onChange(event.target.value) })
+  }
+  return el('div', { class: 'row' },
+    el('span', { class: 'label', text: field.label }),
+    control,
+    hint ? el('span', { class: 'hint', text: hint }) : null)
+}
+
+async function savePet(patch, okText) {
+  const payload = await postJson('/dsh-live-pet/config', { pet: patch })
+  if (payload.petSaved === true) {
+    state.pet = payload.pet || state.pet
+    toast('ok', okText || '宠物设置已保存')
+    render()
+    return true
+  }
+  toast('err', payload.error || '保存失败')
+  return false
+}
+
+function render() {
+  const tabs = [
+    ...SECTIONS.map((section) => [section.id, section.title]),
+    ['model', '模型'],
+    ['scene', '直播背景'],
+    ['poses', '动作'],
+    ['team', '双智能体'],
+    ['live', '直播服务'],
+    ['paths', '路径'],
+    ['advanced', '其它'],
+  ]
+  const nav = $('#tabs')
+  nav.innerHTML = ''
+  for (const [id, label] of tabs) {
+    nav.appendChild(el('button', {
+      class: state.activeTab === id ? 'active' : '',
+      text: label,
+      onclick: () => { state.activeTab = id; render() },
+    }))
+  }
+
+  const main = $('#main')
+  main.innerHTML = ''
+  const definition = SECTIONS.find((section) => section.id === state.activeTab)
+  if (definition) main.appendChild(renderSimpleSection(definition))
+  else if (state.activeTab === 'model') main.appendChild(renderModel())
+  else if (state.activeTab === 'scene') main.appendChild(renderScene())
+  else if (state.activeTab === 'poses') main.appendChild(renderPoses())
+  else if (state.activeTab === 'team') main.appendChild(renderTeam())
+  else if (state.activeTab === 'live') main.appendChild(renderLive())
+  else if (state.activeTab === 'paths') main.appendChild(renderPaths())
+  else main.appendChild(renderAdvanced())
+}
+
+/* --------------------------------------------------------------- 模型 / 连接 */
+function renderModel() {
+  const pet = state.pet || {}
+  const draft = {
+    provider: pet.provider || '', model: pet.model || '', baseUrl: pet.baseUrl || '',
+    apiKey: pet.apiKey || '', apiKeyEnv: pet.apiKeyEnv || 'BUDDYHUB_API_KEY',
+    speak: pet.speak === true, ttsVoice: pet.ttsVoice || '', ttsRate: pet.ttsRate || '', ttsPitch: pet.ttsPitch || '',
+  }
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '模型连接' }),
+    el('div', { class: 'hint', text: '宠物说话就是靠这套：DSH profile 里写模型地址，API key 通过环境变量传给子进程。' }))
+  card.appendChild(fieldRow({ key: 'provider', label: 'provider', type: 'text', hint: '例如 buddyhub' }, draft.provider, (value) => { draft.provider = value }))
+  card.appendChild(fieldRow({ key: 'model', label: 'model', type: 'text', hint: '例如 cn:deepseek-v4.1-flash' }, draft.model, (value) => { draft.model = value }))
+  card.appendChild(fieldRow({ key: 'baseUrl', label: 'baseUrl', type: 'text', hint: 'OpenAI 兼容地址，例如 https://api.xxx/v1' }, draft.baseUrl, (value) => { draft.baseUrl = value }))
+  card.appendChild(fieldRow({ key: 'apiKey', label: 'API key', type: 'text', hint: '留空则用直播服务 settings.json 里的 harness.api_key' }, draft.apiKey, (value) => { draft.apiKey = value }))
+  card.appendChild(fieldRow({ key: 'apiKeyEnv', label: 'key 环境变量名', type: 'text' }, draft.apiKeyEnv, (value) => { draft.apiKeyEnv = value }))
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存模型设置', onclick: () => savePet(draft, '模型设置已保存（下一轮生效）') })))
+
+  const voice = el('section', { class: 'card' },
+    el('h2', { text: '说话 / 音色' }),
+    el('div', { class: 'hint', text: '宠物自己的 TTS（edge-tts）。直播服务那边也有一套音色，两边建议一致。' }))
+  voice.appendChild(fieldRow({ key: 'speak', label: '合成语音', type: 'bool' }, draft.speak, (value) => { draft.speak = value }))
+  voice.appendChild(fieldRow({ key: 'ttsVoice', label: '音色', type: 'text', hint: 'zh-CN-XiaoxiaoNeural / zh-CN-YunxiNeural …' }, draft.ttsVoice, (value) => { draft.ttsVoice = value }))
+  voice.appendChild(fieldRow({ key: 'ttsRate', label: '语速', type: 'text', hint: '+4%' }, draft.ttsRate, (value) => { draft.ttsRate = value }))
+  voice.appendChild(fieldRow({ key: 'ttsPitch', label: '音调', type: 'text', hint: '+3Hz' }, draft.ttsPitch, (value) => { draft.ttsPitch = value }))
+  voice.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存语音设置', onclick: () => savePet({ speak: draft.speak, ttsVoice: draft.ttsVoice, ttsRate: draft.ttsRate, ttsPitch: draft.ttsPitch }, '语音设置已保存') })))
+
+  return el('div', {}, card, voice)
+}
+
+/* --------------------------------------------------------------- 路径 */
+function renderPaths() {
+  const pet = state.pet || {}
+  const draft = {
+    dshBin: pet.dshBin || '', nodeBin: pet.nodeBin || '',
+    pythonBin: pet.pythonBin || 'python', workspace: pet.workspace || '',
+    liveBaseDir: pet.liveBaseDir || '', livePort: pet.livePort, liveHost: pet.liveHost || '127.0.0.1',
+    liveMode: pet.liveMode || 'live', appUrl: pet.appUrl || '',
+    manageLive: pet.manageLive === true, autoStartLive: pet.autoStartLive === true,
+    liveStartTimeoutSec: pet.liveStartTimeoutSec,
+  }
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '可执行文件与目录' }),
+    el('div', { class: 'hint', text: '宠物的大脑是 DSH 的 CLI；直播弹幕服务是 Python。这两个都得先装好，这里只是指路。' }))
+  card.appendChild(fieldRow({ key: 'dshBin', label: 'DSH bin.js', type: 'text', hint: '…\\@deepseek-ai\\dsh\\lib\\bin.js' }, draft.dshBin, (v) => { draft.dshBin = v }))
+  card.appendChild(fieldRow({ key: 'nodeBin', label: 'node.exe', type: 'text' }, draft.nodeBin, (v) => { draft.nodeBin = v }))
+  card.appendChild(fieldRow({ key: 'pythonBin', label: 'python', type: 'text' }, draft.pythonBin, (v) => { draft.pythonBin = v }))
+  card.appendChild(fieldRow({ key: 'workspace', label: '直播服务工作目录', type: 'text', hint: '留空 = 用 exe 自带的 live 目录' }, draft.workspace, (v) => { draft.workspace = v }))
+  card.appendChild(fieldRow({ key: 'liveBaseDir', label: '直播数据目录', type: 'text', hint: '日志/歌曲/音频/设置都在这' }, draft.liveBaseDir, (v) => { draft.liveBaseDir = v }))
+  card.appendChild(fieldRow({ key: 'liveHost', label: '直播服务 host', type: 'text' }, draft.liveHost, (v) => { draft.liveHost = v }))
+  card.appendChild(fieldRow({ key: 'livePort', label: '直播服务端口', type: 'number' }, draft.livePort, (v) => { draft.livePort = v }))
+  card.appendChild(fieldRow({ key: 'liveMode', label: '直播模式', type: 'text', hint: 'live / test' }, draft.liveMode, (v) => { draft.liveMode = v }))
+  card.appendChild(fieldRow({ key: 'liveStartTimeoutSec', label: '启动超时（秒）', type: 'number' }, draft.liveStartTimeoutSec, (v) => { draft.liveStartTimeoutSec = v }))
+  card.appendChild(fieldRow({ key: 'manageLive', label: '由宠物托管直播服务', type: 'bool', hint: '关掉就自己另起 python app.py' }, draft.manageLive, (v) => { draft.manageLive = v }))
+  card.appendChild(fieldRow({ key: 'autoStartLive', label: '启动时自动起直播服务', type: 'bool' }, draft.autoStartLive, (v) => { draft.autoStartLive = v }))
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存路径设置', onclick: async () => {
+      if (await savePet(draft, '路径设置已保存（重启 exe 生效）')) toast('ok', '路径改动需要重启 exe 才完全生效')
+    } })))
+
+  const info = el('section', { class: 'card' },
+    el('h2', { text: '当前文件位置' }),
+    el('div', { class: 'row' }, el('span', { class: 'label', text: 'config.json' }), el('code', { text: state.configFile || '—' })),
+    el('div', { class: 'row' }, el('span', { class: 'label', text: '应用数据目录' }), el('code', { text: state.appHome || '（见 exe 日志）' })))
+  return el('div', {}, card, info)
+}
+
+function renderSimpleSection(definition) {
+  const draft = {}
+  const card = el('section', { class: 'card' },
+    el('h2', { text: definition.title }),
+    definition.hint ? el('div', { class: 'hint', text: definition.hint }) : null)
+  for (const field of definition.fields) {
+    const value = state.pet ? state.pet[field.key] : ''
+    draft[field.key] = value
+    card.appendChild(fieldRow(field, value, (next) => { draft[field.key] = next }))
+  }
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存', onclick: async () => { await savePet(draft, '已保存并立即生效') } })))
+  return card
+}
+
+/* --------------------------------------------------------------- 直播背景 */
+function renderScene() {
+  const pet = state.pet || {}
+  const mode = pet.sceneEnabled === true ? (pet.sceneMinimized === true ? 'minimal' : 'full') : 'off'
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '直播背景（最小化 / 关闭）' }),
+    el('div', { class: 'hint', text: '背景是铺满全屏的那张直播画面（左上弹幕池、右上点歌台）。三个按钮点了立刻生效，右键宠物 → 背景 也能切。' }),
+    el('div', { class: 'row' },
+      el('span', { class: 'label', text: '当前' }),
+      el('span', { class: 'pill ' + (mode === 'full' ? 'ok' : ''), text: mode === 'full' ? '全屏背景' : mode === 'minimal' ? '已最小化（只留宠物）' : '已关闭' })),
+    el('div', { class: 'actions' },
+      el('button', { text: '全屏背景', onclick: () => applyScene('full') }),
+      el('button', { text: '最小化背景（只留宠物）', onclick: () => applyScene('minimal') }),
+      el('button', { text: '关闭背景', onclick: () => applyScene('off') })))
+
+  const picture = el('section', { class: 'card' },
+    el('h2', { text: '背景图与字号' }))
+  const draft = { sceneImage: pet.sceneImage || '', bubbleFontSize: pet.bubbleFontSize, poolFontSize: pet.poolFontSize }
+  picture.appendChild(el('div', { class: 'row' },
+    el('span', { class: 'label', text: '背景图' }),
+    el('input', { type: 'text', value: draft.sceneImage, placeholder: '留空 = 插件自带的 bg/scene.jpg；也可以填本地图片绝对路径', oninput: (event) => { draft.sceneImage = event.target.value } }),
+    el('button', { text: '扫描候选', onclick: async () => {
+      const payload = await api('/dsh-live-pet/scene/backgrounds')
+      const list = Array.isArray(payload.backgrounds) ? payload.backgrounds : []
+      toast('ok', list.length === 0 ? '没在 bg 目录找到图片' : '候选：\n' + list.map((item) => item.path).join('\n'))
+    } })))
+  picture.appendChild(fieldRow({ key: 'bubbleFontSize', label: '气泡字号', type: 'number', hint: '直播建议 20~30' }, draft.bubbleFontSize, (value) => { draft.bubbleFontSize = value }))
+  picture.appendChild(fieldRow({ key: 'poolFontSize', label: '弹幕池字号', type: 'number', hint: '直播建议 20~28' }, draft.poolFontSize, (value) => { draft.poolFontSize = value }))
+  picture.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存背景设置', onclick: () => savePet(draft, '背景设置已保存') })))
+
+  const wander = el('section', { class: 'card' }, el('h2', { text: '自动溜达' }))
+  const wanderDraft = {
+    wander: pet.wander !== false, wanderSpeed: pet.wanderSpeed,
+    wanderDwellMinSec: pet.wanderDwellMinSec, wanderDwellMaxSec: pet.wanderDwellMaxSec,
+  }
+  wander.appendChild(fieldRow({ key: 'wander', label: '自己走动', type: 'bool' }, wanderDraft.wander, (value) => { wanderDraft.wander = value }))
+  wander.appendChild(fieldRow({ key: 'wanderSpeed', label: '走多快（px/s）', type: 'number', hint: '35 慢悠悠，80 有点赶' }, wanderDraft.wanderSpeed, (value) => { wanderDraft.wanderSpeed = value }))
+  wander.appendChild(fieldRow({ key: 'wanderDwellMinSec', label: '停留最短（秒）', type: 'number' }, wanderDraft.wanderDwellMinSec, (value) => { wanderDraft.wanderDwellMinSec = value }))
+  wander.appendChild(fieldRow({ key: 'wanderDwellMaxSec', label: '停留最长（秒）', type: 'number' }, wanderDraft.wanderDwellMaxSec, (value) => { wanderDraft.wanderDwellMaxSec = value }))
+  wander.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存溜达设置', onclick: () => savePet(wanderDraft, '溜达设置已保存') })))
+
+  return el('div', {}, card, picture, wander)
+}
+
+async function applyScene(mode) {
+  const patch = mode === 'off'
+    ? { sceneEnabled: false, sceneMinimized: false }
+    : mode === 'minimal'
+      ? { sceneEnabled: true, sceneMinimized: true }
+      : { sceneEnabled: true, sceneMinimized: false }
+  await savePet(patch, mode === 'full' ? '背景已全屏铺开' : mode === 'minimal' ? '背景已最小化：只留宠物' : '背景已关闭（宠物仍在桌面上）')
+}
+
+/* ------------------------------------------------------------------ 动作 */
+function renderPoses() {
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '动作库（右键宠物 → 动作 也能触发）' }),
+    el('div', { class: 'hint', text: '点一下就让它当场演一个；内置 ' + state.poses.length + ' 个，下面还能自己加。' }))
+  const chips = el('div', { class: 'chips' })
+  for (const pose of state.poses) {
+    chips.appendChild(el('span', {
+      class: 'chip', text: pose.label,
+      title: `${pose.id} · ${pose.emotion} · ${pose.sec}s · fx=${pose.fx}`,
+      onclick: async () => {
+        const result = await api(`/dsh-live-pet/pose?id=${encodeURIComponent(pose.id)}`, { method: 'POST' })
+        toast(result.ok === true ? 'ok' : 'err', result.ok === true ? `演一个：${pose.label}` : (result.error || '触发失败'))
+      },
+    }))
+  }
+  card.appendChild(chips)
+
+  const custom = el('section', { class: 'card' },
+    el('h2', { text: '自定义动作' }),
+    el('div', { class: 'hint', text: 'JSON 数组。字段：id（英文短名）、label（菜单文字）、emotion（情绪帧）、sec（秒）、fx（none / squash / firework / shake / spin / hop）。' }),
+    el('div', { class: 'hint', text: '例：[{"id":"jing","label":"敬个礼","emotion":"happy","sec":5,"fx":"squash"}]' }))
+  const area = el('textarea', { spellcheck: 'false' })
+  area.value = JSON.stringify(Array.isArray(state.pet && state.pet.posesCustom) ? state.pet.posesCustom : [], null, 2)
+  custom.appendChild(area)
+  custom.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存自定义动作', onclick: async () => {
+      let list
+      try {
+        list = area.value.trim() === '' ? [] : JSON.parse(area.value)
+      } catch (error) {
+        toast('err', 'JSON 语法错误：' + (error && error.message ? error.message : error))
+        return
+      }
+      if (!Array.isArray(list)) {
+        toast('err', '必须是一个 JSON 数组')
+        return
+      }
+      if (await savePet({ posesCustom: list }, `已保存 ${list.length} 个自定义动作`)) await loadPoses()
+    } })))
+  return el('div', {}, card, custom)
+}
+
+/* ------------------------------------------------------------- 双智能体 */
+function renderTeam() {
+  const team = Object.assign({}, (state.pet && state.pet.multiAgent) || {})
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '双智能体连麦' }),
+    el('div', { class: 'hint', text: '主宠物和另一个 AI 在直播间里互相说话；观众弹幕随时能插话（弹幕优先）。' }))
+  for (const field of TEAM_FIELDS) {
+    card.appendChild(fieldRow(field, team[field.key], (value) => { team[field.key] = value }))
+  }
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存连麦设置', onclick: () => savePet({ multiAgent: team }, team.enabled === true ? '连麦已开启' : '连麦已关闭') })))
+  return card
+}
+
+/* ------------------------------------------------------------- 直播服务 */
+function renderLive() {
+  const live = state.live
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '直播服务（抖音弹幕 + 点歌）' }),
+    el('div', { class: 'hint', text: state.liveOk ? '已连上直播服务的设置接口。' : '现在读不到直播服务（可能没启动），下面只能改宠物侧设置。' }))
+
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { text: '启动', onclick: () => controlLive('start') }),
+    el('button', { text: '停止', onclick: () => controlLive('stop') }),
+    el('button', { text: '重启', onclick: () => controlLive('restart') }),
+    el('button', { text: '刷新状态', onclick: () => refreshAll() }),
+    el('button', { class: 'ghost', text: '检查依赖', onclick: () => checkDeps() }),
+    el('button', { class: 'ghost', text: '一键安装依赖', onclick: () => installDeps() })))
+
+  if (!live) {
+    card.appendChild(el('div', { class: 'hint', text: '（没有直播服务设置可编辑）' }))
+    return card
+  }
+
+  const douyin = live.douyin || {}
+  const songs = live.songs || {}
+  const group = (title, hint, fields, holder) => {
+    const box = el('section', { class: 'card' }, el('h2', { text: title }), el('div', { class: 'hint', text: hint }))
+    for (const field of fields) box.appendChild(fieldRow(field, holder[field.key], (value) => { holder[field.key] = value }))
+    return box
+  }
+
+  return el('div', {},
+    card,
+    group('抖音弹幕', '房间号写在 live_url 里（https://live.douyin.com/<房间号>）。', [
+      { key: 'mode', label: '模式', type: 'text', hint: 'live / test' },
+      { key: 'live_url', label: '直播间地址', type: 'text' },
+      { key: 'auto_reply_cooldown', label: '回复冷却（秒）', type: 'number' },
+      { key: 'max_reply_per_minute', label: '每分钟最多（条）', type: 'number' },
+      { key: 'welcome_enter', label: '自动欢迎进场', type: 'bool', hint: '宠物接管后一般关掉，交给宠物的欢迎逻辑' },
+      { key: 'welcome_like', label: '自动感谢点赞', type: 'bool' },
+      { key: 'pet_takeover', label: '弹幕交给宠物回复', type: 'bool' },
+    ], douyin),
+    el('div', { class: 'actions' },
+      el('button', { class: 'primary', text: '保存抖音设置', onclick: () => saveLive('douyin', { douyin }) })),
+    group('点歌台', '', [
+      { key: 'enable', label: '开启点歌', type: 'bool' },
+      { key: 'volume', label: '音量（0~1）', type: 'number' },
+      { key: 'max_queue', label: '队列上限', type: 'number' },
+      { key: 'auto_next', label: '自动下一首', type: 'bool' },
+      { key: 'auto_dj', label: '自动当 DJ', type: 'bool' },
+      { key: 'gift_min_value', label: '礼物点歌门槛（元）', type: 'number' },
+    ], songs),
+    el('div', { class: 'actions' },
+      el('button', { class: 'primary', text: '保存点歌设置', onclick: () => saveLive('songs', { songs }) })),
+    group('音色（TTS）', '直播服务与宠物共用这套音色配置。', [
+      { key: 'voice', label: '音色', type: 'text', hint: '例如 zh-CN-XiaoxiaoNeural / zh-CN-YunxiNeural' },
+    ], live),
+    el('div', { class: 'row' },
+      el('span', { class: 'label', text: '语速 / 音调' }),
+      (() => {
+        const rateInput = el('input', { type: 'text', value: live.rate || '', placeholder: '+4%' })
+        const pitchInput = el('input', { type: 'text', value: live.pitch || '', placeholder: '+3Hz' })
+        rateInput.addEventListener('input', () => { live.rate = rateInput.value })
+        pitchInput.addEventListener('input', () => { live.pitch = pitchInput.value })
+        return [rateInput, pitchInput]
+      })()),
+    el('div', { class: 'actions' },
+      el('button', { class: 'primary', text: '保存音色', onclick: () => saveLive('voice', { voice: live.voice, rate: live.rate, pitch: live.pitch }) })))
+}
+
+async function saveLive(group, payload) {
+  try {
+    const result = await postJson('/dsh-live-pet/config', { live: payload })
+    if (result.liveSaved === true) {
+      state.live = result.live && result.live.settings ? result.live.settings : state.live
+      toast('ok', '已写入直播服务')
+      render()
+    } else {
+      toast('err', result.liveError || '直播服务没有确认保存')
+    }
+  } catch (error) {
+    toast('err', '保存失败：' + (error && error.message ? error.message : error))
+  }
+}
+
+async function controlLive(action) {
+  try {
+    toast('ok', `正在 ${action} 直播服务…`)
+    const result = await postJson('/dsh-live-pet/live', { action })
+    toast(result.ok === false ? 'err' : 'ok', result.ok === false ? (result.error || '失败') : `直播服务已 ${action}`)
+    setTimeout(refreshAll, 2500)
+  } catch (error) {
+    toast('err', String(error && error.message ? error.message : error))
+  }
+}
+
+async function checkDeps() {
+  const result = await api('/dsh-live-pet/deps')
+  const missing = Array.isArray(result.missing) ? result.missing : []
+  toast(missing.length === 0 ? 'ok' : 'err', missing.length === 0 ? '依赖齐全' : '缺少：' + missing.join('、'))
+}
+
+async function installDeps() {
+  toast('ok', '开始装 Python 依赖，可能要一两分钟…')
+  const result = await postJson('/dsh-live-pet/deps', { action: 'install' })
+  toast(result.ok === false ? 'err' : 'ok', result.ok === false ? (result.error || '安装失败') : '依赖已安装')
+}
+
+/* ------------------------------------------------------------------ 高级 */
+function renderAdvanced() {
+  const known = new Set([
+    'provider', 'model', 'baseUrl', 'apiKey', 'apiKeyEnv', 'speak', 'ttsVoice', 'ttsRate', 'ttsPitch',
+    'dshBin', 'nodeBin', 'pythonBin', 'workspace', 'liveBaseDir', 'liveHost', 'livePort', 'liveMode',
+    'appUrl', 'manageLive', 'autoStartLive', 'liveStartTimeoutSec', 'appPort', 'audioDir',
+  ])
+  for (const section of SECTIONS) for (const field of section.fields) known.add(field.key)
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '其它设置（高级）' }),
+    el('div', { class: 'hint', text: '上面几页没覆盖到的项，在这里直接改。数字/开关会自动识别，其它按文本处理。' }))
+  const draft = {}
+  for (const [key, value] of Object.entries(state.pet || {})) {
+    if (known.has(key)) continue
+    if (key === 'multiAgent' || key === 'posesCustom') continue
+    if (typeof value === 'object' && value !== null) continue
+    const type = typeof value === 'boolean' ? 'bool' : (typeof value === 'number' ? 'number' : 'text')
+    draft[key] = value
+    card.appendChild(fieldRow({ key, label: key, type }, value, (next) => { draft[key] = next }))
+  }
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存这些', onclick: () => savePet(draft, '已保存') })))
+
+  const paths = el('section', { class: 'card' },
+    el('h2', { text: '位置' }),
+    el('div', { class: 'row' }, el('span', { class: 'label', text: 'config.json' }), el('code', { text: state.configFile || '—' })),
+    el('div', { class: 'row' }, el('span', { class: 'label', text: 'pet profile' }), el('code', { text: (state.pet && state.pet.profile) || 'pet' })))
+  return el('div', {}, card, paths)
+}
+
+/* ------------------------------------------------------------------ 数据 */
+async function loadPoses() {
+  try {
+    const payload = await api('/dsh-live-pet/poses')
+    state.poses = Array.isArray(payload.poses) ? payload.poses : []
+  } catch {
+    state.poses = []
+  }
+}
+
+async function refreshAll() {
+  try {
+    const payload = await api('/dsh-live-pet/config')
+    state.pet = payload.pet || {}
+    state.live = payload.live && payload.live.settings ? payload.live.settings : null
+    state.liveOk = Boolean(payload.live && payload.live.ok)
+    state.configFile = payload.configFile || ''
+    await loadPoses()
+    render()
+  } catch (error) {
+    toast('err', '读取配置失败：' + (error && error.message ? error.message : error))
+  }
+  refreshStatus()
+}
+
+async function refreshStatus() {
+  try {
+    const health = await api('/health')
+    $('#version').textContent = 'v' + health.version
+    state.appHome = health.home || ''
+  } catch { /* 无所谓 */ }
+  try {
+    const statePayload = await api('/dsh-live-pet/state')
+    const status = String(statePayload.status || '')
+    const emotion = String(statePayload.emotion || '')
+    $('#petState').textContent = `宠物：${status || '?'} · ${EMOTION_LABELS[emotion] || emotion || '?'}`
+    $('#petState').className = 'pill ' + (status === 'offline' ? 'err' : 'ok')
+    const display = statePayload.scene ? String(statePayload.scene.display || '') : ''
+    const sceneText = display === 'full' ? '全屏背景' : display === 'minimal' ? '最小化（只留宠物）' : '已关闭'
+    $('#sceneState').textContent = '背景：' + sceneText
+    if (statePayload.config && statePayload.config.multiAgent === true) {
+      $('#sceneState').textContent += ` · 连麦中（${statePayload.config.agentB || 'B'}）`
+    }
+  } catch {
+    $('#petState').textContent = '宠物状态：读不到'
+    $('#petState').className = 'pill err'
+  }
+  try {
+    const live = await api('/dsh-live-pet/live')
+    const running = live && live.status && (live.status.running === true || live.status.ok === true)
+    $('#liveState').textContent = '直播服务：' + (running ? `运行中 ${live.status.port || ''}`.trim() : '未运行')
+    $('#liveState').className = 'pill ' + (running ? 'ok' : '')
+  } catch {
+    $('#liveState').textContent = '直播服务：读不到'
+    $('#liveState').className = 'pill err'
+  }
+}
+
+$('#refreshAll').addEventListener('click', () => refreshAll())
+refreshAll()
+setInterval(refreshStatus, 4000)
+</script>
+</body>
+</html>
