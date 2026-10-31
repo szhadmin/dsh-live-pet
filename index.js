@@ -12,6 +12,7 @@
  * a separate process so a stuck turn can never block the Harness host.
  */
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
@@ -46,6 +47,9 @@ const EMOTIONS = ['happy', 'mischievous', 'crying', 'unhappy', 'eating', 'cookin
 
 /** Plugin keys the settings page may write. */
 const PET_CONFIG_KEYS = [
+  'eyesEnabled',
+  'eyesEverySec',
+  'eyesWidth',
   'sceneEnabled',
   'sceneImage',
   'sceneMinimized',
@@ -159,6 +163,10 @@ const DEFAULTS = {
   pollMs: 800,
   replyKinds: ['comment'],
   timeoutMs: 45000,
+  // 眼睛：让智能体随时知道桌面上在发生什么
+  eyesEnabled: true,
+  eyesEverySec: 90,
+  eyesWidth: 700,
   maxChars: 70,
   /** The owner's typed questions get room to answer (they may report tool results). */
   chatMaxChars: 240,
@@ -633,7 +641,7 @@ function resolveApiKey(config) {
  */
 
 /** 抓一张主屏截图，成功返回文件路径 */
-function captureScreen(target) {
+function captureScreen(target, width) {
   const script = [
     'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
     '$sc=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
@@ -641,7 +649,7 @@ function captureScreen(target) {
     '$g=[System.Drawing.Graphics]::FromImage($bmp)',
     '$g.CopyFromScreen($sc.X,$sc.Y,0,0,$bmp.Size)',
     '$g.Dispose()',
-    '$w=900; $h=[int]($sc.Height*$w/$sc.Width)',
+    '$w=' + String(Number(width) || 900) + '; $h=[int]($sc.Height*$w/$sc.Width)',
     '$small=New-Object System.Drawing.Bitmap($w,$h)',
     '$gs=[System.Drawing.Graphics]::FromImage($small)',
     '$gs.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
@@ -695,11 +703,19 @@ function normalizeImage(source, target) {
   return target
 }
 
+/** 视觉调用花了多少 token 的上报钩子（插件闭包里注册，因为 state 在那里） */
+let visionUsageSink = null
+
 /** 把截图交给视觉模型，拿回一句话 */
-async function describeScreen(config, question, imagePath) {
-  const file = join(PKG_DIR, `screen-${Date.now()}.png`)
+async function describeScreen(config, question, imagePath, raw) {
+  let file = join(PKG_DIR, `screen-${Date.now()}.png`)
+  let temporary = true
   try {
-    if (typeof imagePath === 'string' && imagePath.trim() !== '') {
+    if (raw === true) {
+      // 已经是现成的 PNG（眼睛定时抓的那张），直接发，别再多转一次
+      file = imagePath
+      temporary = false
+    } else if (typeof imagePath === 'string' && imagePath.trim() !== '') {
       const source = imagePath.trim().replace(/^"|"$/g, '')
       if (!existsSync(source)) throw new Error(`找不到这张图：${source}`)
       normalizeImage(source, file)
@@ -732,13 +748,19 @@ async function describeScreen(config, question, imagePath) {
     let json = null
     try { json = JSON.parse(text) } catch { throw new Error(`视觉接口返回的不是 JSON：${text.slice(0, 120)}`) }
     const choice = json && json.choices && json.choices[0] ? json.choices[0] : {}
+    // 看图也要记账：眼睛是定时跑的，不记的话用量面板会明显偏低
+    // （describeScreen 在模块顶层，state 在插件闭包里，所以通过回调上报）
+    const spent = json && json.usage ? json.usage : null
+    if (spent && typeof visionUsageSink === 'function') {
+      visionUsageSink(Number(spent.prompt_tokens) || 0, Number(spent.completion_tokens) || 0)
+    }
     const message = choice.message || {}
     if (!message.content && choice.finish_reason === 'length') {
       throw new Error('视觉模型把 token 都花在思考上了（finish=length），换个模型或调大 max_tokens')
     }
     return String(message.content || '').trim()
   } finally {
-    try { rmSync(file, { force: true }) } catch { /* 删不掉就算了 */ }
+    if (temporary) { try { rmSync(file, { force: true }) } catch { /* 删不掉就算了 */ } }
   }
 }
 
@@ -1520,6 +1542,91 @@ async function lookAtScreen(options = {}) {
   }
 }
 
+/* ----------------------------------- 眼睛：让它随时知道桌面上在发生什么
+ * 每 eyesEverySec 秒抓一次屏（默认 90s），问视觉模型一句「现在在干嘛」，
+ * 存成一句话的「当前所见」，之后每一轮对话（弹幕/聊天/连麦/自说自话）都会带上它，
+ * 所以老板随时问「你在干嘛」，它都能答出「我在旁边看你打英雄联盟呢」。
+ * 画面没变就不调模型（对比图片哈希），省 token。
+ */
+const EYES_QUESTION = '你是一只住在主播电脑桌面上的小宠物，能看见主播的屏幕。用不超过 25 个字客观说清楚主播现在在干什么：在玩什么游戏、在用什么软件、在看什么内容。不要表情，不要用「主播」这个称呼，直接说「在打英雄联盟」「在写代码」这种。'
+const eyes = { timer: null, last: { at: 0, text: '', hash: '' }, busy: false }
+
+// 看图的 token 也记进用量面板
+visionUsageSink = (input, output) => {
+  if (!state || !state.usage) return
+  if (input + output <= 0) return
+  state.usage.input += input
+  state.usage.output += output
+  state.usage.total += input + output
+  state.usage.lastAt = Date.now()
+  log(`vision usage +${input + output} tokens（看图），累计 ${state.usage.total}`)
+}
+
+function eyesEveryMs() {
+  const seconds = Number(config.eyesEverySec) || 90
+  return Math.max(20, seconds) * 1000
+}
+
+/** 眼睛看到的一句话（给每一轮对话用）；太旧就不算数 */
+function eyesLine() {
+  if (eyes.last.text === '') return ''
+  const ageSec = Math.round((Date.now() - eyes.last.at) / 1000)
+  if (ageSec > 600) return ''
+  return `【你现在眼睛看到的主播桌面：${eyes.last.text}（${ageSec} 秒前看到的）】`
+}
+
+function scheduleEyes(delayMs) {
+  if (eyes.timer) {
+    clearTimeout(eyes.timer)
+    eyes.timer = null
+  }
+  if (!alive || config.eyesEnabled !== true) return
+  eyes.timer = setTimeout(() => {
+    eyes.timer = null
+    void eyesTick()
+  }, Math.max(5000, Number(delayMs) || eyesEveryMs()))
+}
+
+/** 立刻看一眼（老板问「你在干嘛」时用来刷新） */
+async function eyesRefresh() {
+  eyes.last.at = 0
+  eyes.last.hash = ''
+  await eyesTick()
+  return eyes.last
+}
+
+async function eyesTick() {
+  try {
+    if (!alive || config.eyesEnabled !== true) return
+    if (eyes.busy) {
+      scheduleEyes(5000)
+      return
+    }
+    eyes.busy = true
+    const file = join(PKG_DIR, 'eyes.png')
+    try {
+      captureScreen(file, Number(config.eyesWidth) || 700)
+      const hash = createHash('sha1').update(readFileSync(file)).digest('hex')
+      if (hash === eyes.last.hash && eyes.last.text !== '') {
+        eyes.last.at = Date.now()
+        log('eyes: 画面没变，跳过（省 token）')
+      } else {
+        const answer = await describeScreen(config, EYES_QUESTION, file, true)
+        if (answer !== '') {
+          eyes.last = { at: Date.now(), text: answer, hash }
+          log(`eyes: ${answer.replace(/\s+/g, ' ').slice(0, 120)}`)
+        }
+      }
+    } finally {
+      eyes.busy = false
+    }
+  } catch (error) {
+    log(`eyes failed: ${error && error.message ? error.message : error}`)
+  } finally {
+    scheduleEyes()
+  }
+}
+
 function bump(update) {
     const patch = update && typeof update === 'object' ? update : {}
     const slot = patch.slot === 'b' ? 'b' : patch.slot === 'a' ? 'a' : ''
@@ -1786,6 +1893,9 @@ function addFastEnter(name) {
     let prompt
     if (bullet.banter === true) {
       prompt = [header, banterPromptFor(me, bullet)].filter(Boolean).join('\n')
+    // 眼睛：连麦时也知道桌面上在干嘛，能顺嘴提一句
+    const banterEyes = eyesLine()
+    if (banterEyes !== '') prompt = `${banterEyes}\n\n${prompt}`
     } else if (bullet.idle === true) {
       prompt = [header, '【冷场】', idlePrompt].filter(Boolean).join('\n')
     } else if (bullet.gift) {
@@ -1822,6 +1932,18 @@ function addFastEnter(name) {
     const personaText = customPersona !== '' ? customPersona : fallbackPersona
     const personaLabel = customPersona !== '' ? '老板设定的人设' : '你的人设'
     prompt = `【${personaLabel}（最高优先，和别的设定冲突时以此为准；不要向观众念这段）】\n${personaText}\n\n${prompt}`
+    // 眼睛：让它永远知道桌面上在发生什么（老板问「你在干嘛」能直接答）
+    const askWhatDoing = bullet.chat === true && /(在干嘛|在干什么|干啥|做什么|忙什么|在玩什么|玩什么呢|现在在做什么)/.test(String(bullet.text || ''))
+    if (askWhatDoing) {
+      // 老板问「你在干嘛」：先现场刷新一次，别拿十分钟前的画面糊弄
+      try {
+        if (Date.now() - eyes.last.at > 30000) await eyesRefresh()
+      } catch (error) {
+        log(`eyes refresh for chat failed: ${error && error.message ? error.message : error}`)
+      }
+    }
+    const eyeContext = eyesLine()
+    if (eyeContext !== '') prompt = `${eyeContext}\n\n${prompt}`
     // 老板让你「看看桌面/屏幕」时先真去看一眼，再把看到的内容塞进这一轮
     const ownerText = String(bullet.text || '')
     // 老板直接把图片路径/文件名丢过来（"看看 D:\\a.png"）时，优先看这张图
@@ -3273,6 +3395,10 @@ function addFastEnter(name) {
     }
     schedule()
     if (config.idleChat) scheduleIdle()
+    if (config.eyesEnabled === true) {
+      log(`eyes on: 每 ${Math.round(eyesEveryMs() / 1000)}s 看一眼桌面（宽 ${Number(config.eyesWidth) || 700}px）`)
+      scheduleEyes(8000)
+    }
     if (multiAgentOn()) {
       log(`multi-agent on: A=${agentFor('a').name} (${agentFor('a').profile}) / B=${agentFor('b').name} (${agentFor('b').profile}) mode=${String(config.multiAgent.mode || 'argue')}`)
       scheduleBanter(3000)
@@ -3287,6 +3413,8 @@ function addFastEnter(name) {
       idleTimer = null
       if (banter.timer) clearTimeout(banter.timer)
       banter.timer = null
+      if (eyes.timer) clearTimeout(eyes.timer)
+      eyes.timer = null
       stopPet()
       closeScene()
       if (config.manageLive === true) void stopLive()
