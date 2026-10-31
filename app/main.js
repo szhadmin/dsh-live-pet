@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path'
 /* 打包时由 esbuild --define 注入 */
 const IS_SEA = typeof __IS_SEA__ === 'boolean' ? __IS_SEA__ : false
 /** 资源解包布局版本：改了资源结构（新增/重命名目录）就 +1，强制重新解包 */
-const ASSET_LAYOUT = '2026-10-31a'
+const ASSET_LAYOUT = '2026-10-31b'
 /** 应用版本：解包后从 resources/package.json 读，读不到就是 dev */
 let APP_VERSION = 'dev'
 

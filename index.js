@@ -14,7 +14,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, basename } from 'node:path'
+import { dirname, join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dsh-live-pet'
@@ -158,7 +158,7 @@ const DEFAULTS = {
   sessionTtlHours: 12,
   pollMs: 800,
   replyKinds: ['comment'],
-  timeoutMs: 30000,
+  timeoutMs: 45000,
   maxChars: 70,
   /** The owner's typed questions get room to answer (they may report tool results). */
   chatMaxChars: 240,
@@ -263,7 +263,37 @@ function loadConfig() {
     ...(fileConfig && typeof fileConfig.multiAgent === 'object' && fileConfig.multiAgent ? fileConfig.multiAgent : {}),
   }
   if (!Array.isArray(merged.posesCustom)) merged.posesCustom = []
+  sanitizePaths(merged)
   return merged
+}
+
+/**
+ * 老配置里常留着 F:\\douyinlive 这种本机已经没有的路径。
+ * 直接照着跑的话：后端连不上、点歌音频写不出去，表现出来就是「功能没生效」。
+ * 这里只做兜底纠正，找不到就落到插件目录下的可用位置。
+ */
+function sanitizePaths(config) {
+  const isDir = (target) => {
+    try { return statSync(String(target)).isDirectory() } catch { return false }
+  }
+  const workspace = String(config.workspace || '').trim()
+  if (workspace === '' || !isDir(workspace)) {
+    const fallback = liveWorkspaceOf(config) || PKG_DIR
+    if (workspace !== fallback) {
+      log(`workspace 不存在（${workspace || '空'}），改用 ${fallback}`)
+      config.workspace = fallback
+    }
+  }
+  const audioDir = String(config.audioDir || '').trim()
+  if (audioDir === '' || !isDir(dirname(audioDir))) {
+    const base = String(config.liveBaseDir || '').trim() || join(PKG_DIR, 'live-data')
+    const fallback = join(base, 'data', 'audio')
+    if (audioDir !== fallback) {
+      log(`audioDir 不可用（${audioDir || '空'}），改用 ${fallback}`)
+      config.audioDir = fallback
+    }
+  }
+  return config
 }
 
 /* -------------------------------------------------------------------- log */
@@ -298,15 +328,24 @@ function resolveDsh(config) {
     'node',
   ].filter((value) => typeof value === 'string' && value.trim() !== '')
 
-  const roots = [process.env.DSH_ROOT, process.env.FATWHALE_DSH_ROOT, 'F:\\tool\\deepseek\\resources']
-    .filter((value) => typeof value === 'string' && value.trim() !== '')
+  const roots = [
+    process.env.DSH_ROOT,
+    process.env.FATWHALE_DSH_ROOT,
+    'F:\\tool\\deepseek\\resources',
+    'D:\\tools\\deepseek\\resources',
+    join(homedir(), '.dsh', 'dsh-app'),
+    join(homedir(), '.dsh'),
+  ].filter((value) => typeof value === 'string' && value.trim() !== '')
 
   const binCandidates = [config.dshBin, process.env.DSH_BIN].filter(
     (value) => typeof value === 'string' && value.trim() !== '',
   )
+  // 各种装法都试一遍：<root>/app/dsh、<root>/app.asar/dsh、<root>/dsh、<root> 本身
+  const middles = ['app/dsh', 'app.asar/dsh', 'dsh', '']
   for (const root of roots) {
-    binCandidates.push(join(root, 'app', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
-    binCandidates.push(join(root, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+    for (const middle of middles) {
+      binCandidates.push(join(root, middle, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+    }
   }
 
   const bin = binCandidates.find((candidate) => candidate && existsSync(candidate))
@@ -1632,7 +1671,7 @@ function addFastEnter(name) {
     const personaLabel = customPersona !== '' ? '老板设定的人设' : '你的人设'
     prompt = `【${personaLabel}（最高优先，和别的设定冲突时以此为准；不要向观众念这段）】\n${personaText}\n\n${prompt}`
 
-    const attempt = async (sessionId) => {
+    const attempt = async (sessionId, timeoutOverride) => {
       const args = [dsh.bin, me.profile, '--json']
       if (sessionId) args.push('--session-id', sessionId)
       args.push(prompt)
@@ -1645,7 +1684,7 @@ function addFastEnter(name) {
       const result = await runProcess(dsh.node, args, {
         cwd: spawnCwd(config),
         env,
-        timeoutMs: Number(config.timeoutMs) || 30000,
+        timeoutMs: Number(timeoutOverride) || Number(config.timeoutMs) || 45000,
         onStdout: (chunk) => {
           // 工具结果打进日志：点歌/切歌到底有没有真的发生，一眼能看出来
           for (const raw of chunk.split('\n')) {
@@ -1672,6 +1711,13 @@ function addFastEnter(name) {
     if (out.code !== 0 && record && /session/i.test(out.errorText || out.stderr || '')) {
       clearSession(key)
       out = await attempt(undefined)
+    }
+    // 冷启动（第一次跑 profile / 装依赖 / 建索引）经常超过 timeoutMs，被 kill 掉就只剩 exit -1。
+    // 超时不算真失败：会话是新的，放宽一倍再要一次，别让宠物第一句话就哑。
+    if (out.code !== 0 && out.timedOut === true) {
+      const wider = Math.round((Number(config.timeoutMs) || 45000) * 2)
+      log(`turn timed out, retry with ${wider}ms`)
+      out = await attempt(undefined, wider)
     }
     if (out.code !== 0 || out.finalText === '') {
       const detail = (out.errorText || out.stderr || '').trim().split('\n').slice(-1)[0] || `exit ${out.code}`
@@ -2004,6 +2050,24 @@ function addFastEnter(name) {
     }
   }
 
+  // 直播服务挂了（比如被关掉、崩了、换端口）时，别让宠物一直「连不上」：
+  // 连续几次连不上就自己重新拉起来，弹幕/点歌才能恢复。
+  let liveDownStreak = 0
+  let liveRestartAt = 0
+  async function reviveLive() {
+    if (config.manageLive !== true) return
+    if (Date.now() - liveRestartAt < 60000) return
+    liveRestartAt = Date.now()
+    try {
+      log('live service looks down, restarting it')
+      const result = await startLive()
+      log(`live restart -> ok=${result && result.ok === true} ${result && result.error ? result.error : ''}`)
+      liveDownStreak = 0
+    } catch (error) {
+      log(`live restart failed: ${error && error.message ? error.message : error}`)
+    }
+  }
+
   async function poll() {
     enforcePetWindows()
     if (!alive) return
@@ -2017,12 +2081,15 @@ function addFastEnter(name) {
     try {
       live = await fetchState(config)
     } catch (error) {
+      liveDownStreak += 1
       if (state.status !== 'offline') {
         bump({ status: 'offline', lastError: `连不上直播服务：${error && error.message ? error.message : error}` })
         log(`live project unreachable: ${error && error.message ? error.message : error}`)
       }
+      if (liveDownStreak >= 3) void reviveLive()
       return
     }
+    liveDownStreak = 0
     const musicQueue = live && typeof live.music_queue === 'object' && live.music_queue ? live.music_queue : null
     const currentSong = musicQueue && typeof musicQueue.current === 'object' && musicQueue.current ? musicQueue.current : null
     state.live = {

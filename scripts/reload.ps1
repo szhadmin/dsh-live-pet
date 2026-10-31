@@ -18,8 +18,33 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if ($Origin -eq '') {
-    $Origin = if ($env:DSH_WEB_URL) { $env:DSH_WEB_URL.TrimEnd('/') } else { 'http://127.0.0.1:62209' }
+    if ($env:DSH_WEB_URL) {
+        $Origin = $env:DSH_WEB_URL.TrimEnd('/')
+    } else {
+        # DSH 每次启动的网页端口都是随机的：挨个试本机监听端口，
+        # 谁能回 /dsh-live-pet/state 或者像 DSH 的网页根，就用谁。
+        $candidates = @()
+        try {
+            $appPids = @(Get-Process -ErrorAction SilentlyContinue |
+                Where-Object { $_.ProcessName -match 'deepseek|dsh|node|electron' } |
+                Select-Object -ExpandProperty Id)
+            $candidates += Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                Where-Object { $appPids -contains $_.OwningProcess -and $_.LocalPort -ne 8791 } |
+                Select-Object -ExpandProperty LocalPort -Unique
+        } catch { /* 拿不到就退回默认端口 */ }
+        $candidates += @(62209, 56915)
+        # 只认能回插件 state 的那个端口，别把直播服务（8791）当成 DSH
+        foreach ($port in ($candidates | Sort-Object -Unique)) {
+            try {
+                $null = Invoke-WebRequest -Uri ("http://127.0.0.1:$port" + $StatePath) -UseBasicParsing -TimeoutSec 3
+                $Origin = "http://127.0.0.1:$port"
+                break
+            } catch { /* 下一个 */ }
+        }
+        if ($Origin -eq '') { $Origin = 'http://127.0.0.1:62209' }
+    }
 }
+Write-Host "使用地址：$Origin" -ForegroundColor DarkGray
 $profileDir = if ($env:DSH_PROFILE_DIR) { $env:DSH_PROFILE_DIR } else { Join-Path $env:USERPROFILE '.dsh\profiles\desktop' }
 $patch = Join-Path $profileDir 'cordis.patch.yml'
 if (-not (Test-Path $patch)) { throw "找不到 profile patch：$patch" }
