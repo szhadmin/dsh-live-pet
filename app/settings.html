@@ -529,7 +529,37 @@ function renderLive() {
         return [rateInput, pitchInput]
       })()),
     el('div', { class: 'actions' },
-      el('button', { class: 'primary', text: '保存音色', onclick: () => saveLive('voice', { voice: live.voice, rate: live.rate, pitch: live.pitch }) })))
+      el('button', { class: 'primary', text: '保存音色', onclick: () => saveLive('voice', { voice: live.voice, rate: live.rate, pitch: live.pitch }) })),
+    renderLiveExtra(live))
+}
+
+/** 上面没做成表单的直播设置：原样给个 JSON 编辑器，保证「设置都迁过来」不漏项 */
+function renderLiveExtra(live) {
+  const COVERED = new Set([
+    'douyin', 'songs', 'voice', 'rate', 'pitch', 'has_key', 'key_hint',
+    'persona_default', 'persona_is_default',
+  ])
+  const rest = {}
+  for (const [key, value] of Object.entries(live)) if (!COVERED.has(key)) rest[key] = value
+
+  const card = el('section', { class: 'card' },
+    el('h2', { text: '其它直播设置（JSON）' }),
+    el('div', { class: 'hint', text: '模型、人设、记忆、工具开关、空闲/宣传、礼物动作这些原样放在这里，改完点保存。' }))
+  const area = el('textarea', { spellcheck: 'false' })
+  area.value = JSON.stringify(rest, null, 2)
+  card.appendChild(area)
+  card.appendChild(el('div', { class: 'actions' },
+    el('button', { class: 'primary', text: '保存其它直播设置', onclick: async () => {
+      let parsed
+      try {
+        parsed = JSON.parse(area.value)
+      } catch (error) {
+        toast('err', 'JSON 语法错误：' + (error && error.message ? error.message : error))
+        return
+      }
+      await saveLive('extra', parsed)
+    } })))
+  return card
 }
 
 async function saveLive(group, payload) {
