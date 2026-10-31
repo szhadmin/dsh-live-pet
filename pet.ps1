@@ -1165,20 +1165,18 @@ function Hide-Input {
     $script:Box.Text = ''
 }
 
-# 让插件去截屏 + 看图，结果通过 state 推回来自己会说（这里只负责不卡界面地发请求）
-function Look-Desktop {
-    Show-Bubble '我看一眼…' 8000
-    Write-PetLog 'look desktop requested'
+# 后台发 /see（别卡 WPF 界面），结果由插件推进 state，宠物自己会说
+function Send-SeeRequest([string]$JsonBody) {
     $url = $script:HostBase + '/see'
-    Start-Job -ArgumentList $url -ScriptBlock {
-        param($url)
+    Start-Job -ArgumentList $url, $JsonBody -ScriptBlock {
+        param($url, $jsonBody)
         try {
             $request = [System.Net.HttpWebRequest]::Create($url)
             $request.Method = 'POST'
             $request.ContentType = 'application/json; charset=utf-8'
             $request.Timeout = 60000
             $request.Proxy = $null
-            $body = [System.Text.Encoding]::UTF8.GetBytes('{}')
+            $body = [System.Text.Encoding]::UTF8.GetBytes($jsonBody)
             $request.ContentLength = $body.Length
             $stream = $request.GetRequestStream()
             $stream.Write($body, 0, $body.Length)
@@ -1187,6 +1185,24 @@ function Look-Desktop {
             $response.Close()
         } catch { }
     } | Out-Null
+}
+
+function Look-Desktop {
+    Show-Bubble '我看一眼…' 8000
+    Write-PetLog 'look desktop requested'
+    Send-SeeRequest '{}'
+}
+
+function Look-Image {
+    $dialog = New-Object Microsoft.Win32.OpenFileDialog
+    $dialog.Title = '挑一张图给它看'
+    $dialog.Filter = '图片文件|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp|所有文件|*.*'
+    $dialog.Multiselect = $false
+    if ($dialog.ShowDialog() -ne $true) { return }
+    $path = [string]$dialog.FileName
+    Show-Bubble '我看看这张…' 8000
+    Write-PetLog ('look image: ' + $path)
+    Send-SeeRequest ('{"file":' + (ConvertTo-Json $path -Compress) + '}')
 }
 
 function Send-Chat([string]$Text) {
@@ -2135,6 +2151,12 @@ $lookItem = New-Object System.Windows.Controls.MenuItem
 $lookItem.Header = '看一眼桌面'
 $lookItem.Add_Click({ Look-Desktop })
 [void]$menu.Items.Add($lookItem)
+
+# 看一眼图片：挑一张本地图（png/jpg/gif/bmp/webp）丢给视觉模型
+$lookImageItem = New-Object System.Windows.Controls.MenuItem
+$lookImageItem.Header = '看一眼图片…'
+$lookImageItem.Add_Click({ Look-Image })
+[void]$menu.Items.Add($lookImageItem)
 
 # 动作：主动让它演一个（动作库从插件 /poses 拿，设置页加了自定义动作这里会自动出现）
 $script:PoseMenu = New-Object System.Windows.Controls.MenuItem

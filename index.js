@@ -664,11 +664,48 @@ function captureScreen(target) {
   return target
 }
 
+/**
+ * 老板丢过来一张图时用：任何格式（gif/bmp/超大 png）先归一化成宽 900 的 PNG，
+ * 视觉接口只认静态图，GIF 只取第一帧。
+ */
+function normalizeImage(source, target) {
+  const script = [
+    'Add-Type -AssemblyName System.Drawing',
+    `$img=[System.Drawing.Image]::FromFile('${source}')`,
+    '$w=900; if ($img.Width -lt $w) { $w=$img.Width }',
+    '$h=[int]($img.Height*$w/$img.Width)',
+    '$bmp=New-Object System.Drawing.Bitmap($w,$h)',
+    '$g=[System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
+    '$g.DrawImage($img,0,0,$w,$h)',
+    '$g.Dispose()',
+    `$bmp.Save('${target}',[System.Drawing.Imaging.ImageFormat]::Png)`,
+    '$bmp.Dispose(); $img.Dispose()',
+    "Write-Output 'ok'",
+  ].join('\n')
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+    timeout: 25000,
+    windowsHide: true,
+    encoding: 'utf8',
+  })
+  if (!existsSync(target)) {
+    const tail = String((result && (result.stderr || result.stdout)) || '').trim().slice(-200)
+    throw new Error(`图片读不出来${tail === '' ? '' : '：' + tail}`)
+  }
+  return target
+}
+
 /** 把截图交给视觉模型，拿回一句话 */
-async function describeScreen(config, question) {
+async function describeScreen(config, question, imagePath) {
   const file = join(PKG_DIR, `screen-${Date.now()}.png`)
   try {
-    captureScreen(file)
+    if (typeof imagePath === 'string' && imagePath.trim() !== '') {
+      const source = imagePath.trim().replace(/^"|"$/g, '')
+      if (!existsSync(source)) throw new Error(`找不到这张图：${source}`)
+      normalizeImage(source, file)
+    } else {
+      captureScreen(file)
+    }
     const base64 = readFileSync(file).toString('base64')
     const key = resolveApiKey(config)
     const base = String(config.baseUrl || 'https://api.deepseek.com/v1').replace(/\/+$/, '')
@@ -1455,14 +1492,20 @@ let screenHoldUntil = 0
 async function lookAtScreen(options = {}) {
   const me = state.slots.a || {}
   const who = String(me.name || config.petName || '宠物')
-  const question = String(options.question || '').trim() || [
-    `你叫${who}，正陪主播直播，现在偷看了一眼主播的电脑屏幕。`,
-    '用一到两句话口语点评你看到的东西：在玩什么/在写什么/窗口乱不乱，可以吐槽。',
-    '不要罗列窗口清单，不要念文件名，40 字以内。',
-  ].join('')
+  const hasFile = typeof options.file === 'string' && options.file.trim() !== ''
+  const question = String(options.question || '').trim() || (hasFile
+    ? [
+      `你叫${who}，正陪主播直播，主播给你发了一张图让你看。`,
+      '用一到两句话口语点评这张图：画的是什么、好不好看、有什么槽点。40 字以内。',
+    ].join('')
+    : [
+      `你叫${who}，正陪主播直播，现在偷看了一眼主播的电脑屏幕。`,
+      '用一到两句话口语点评你看到的东西：在玩什么/在写什么/窗口乱不乱，可以吐槽。',
+      '不要罗列窗口清单，不要念文件名，40 字以内。',
+    ].join(''))
   const started = Date.now()
   try {
-    const text = await describeScreen(config, question)
+    const text = await describeScreen(config, question, options.file)
     if (text === '') return { ok: false, error: '模型没返回内容' }
     lastScreen = { at: Date.now(), text }
     // 8 秒内别让连麦/主动说话把它盖掉，老板得看清它说了啥
@@ -1780,7 +1823,20 @@ function addFastEnter(name) {
     const personaLabel = customPersona !== '' ? '老板设定的人设' : '你的人设'
     prompt = `【${personaLabel}（最高优先，和别的设定冲突时以此为准；不要向观众念这段）】\n${personaText}\n\n${prompt}`
     // 老板让你「看看桌面/屏幕」时先真去看一眼，再把看到的内容塞进这一轮
-    if (bullet.chat === true && /(看|瞄|瞅).{0,4}(桌面|屏幕|电脑)|屏幕上|你看到|看看我在/.test(String(bullet.text || ''))) {
+    const ownerText = String(bullet.text || '')
+    // 老板直接把图片路径/文件名丢过来（"看看 D:\\a.png"）时，优先看这张图
+    const imagePathHit = bullet.chat === true
+      ? ownerText.match(/([A-Za-z]:[\\/][^\s"'<>|]+\.(?:png|jpe?g|gif|bmp|webp))/i)
+      : null
+    if (bullet.chat === true && imagePathHit) {
+      try {
+        const seen = await lookAtScreen({ file: imagePathHit[1] })
+        if (seen.ok === true) prompt = `【主播给你看了这张图（${basename(imagePathHit[1])}）：${seen.text}】\n\n${prompt}`
+        else log(`look at image failed: ${seen.error}`)
+      } catch (error) {
+        log(`look at image failed: ${error && error.message ? error.message : error}`)
+      }
+    } else if (bullet.chat === true && /(看|瞄|瞅).{0,4}(桌面|屏幕|电脑)|屏幕上|你看到|看看我在/.test(ownerText)) {
       try {
         if (Date.now() - lastScreen.at > 15000) {
           const seen = await lookAtScreen({})
@@ -3019,7 +3075,7 @@ function addFastEnter(name) {
       if (pathname === '/dsh-live-pet/see' && req.method === 'POST') {
         let body = {}
         try { body = await readJsonBody(req, 4096) } catch { body = {} }
-        sendJson(res, await lookAtScreen({ question: body && body.question, emotion: body && body.emotion }))
+        sendJson(res, await lookAtScreen({ question: body && body.question, emotion: body && body.emotion, file: body && (body.file || body.path) }))
         return
       }
       if (pathname === '/dsh-live-pet/usage' && req.method === 'GET') {
