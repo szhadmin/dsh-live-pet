@@ -1315,7 +1315,11 @@ export function apply(ctx) {
     const now = Date.now()
     const gapMs = Math.max(0, Number(config.welcomeEnterUserGapSec) || 0) * 1000
     const last = welcomedRecently.get(user) || 0
-    if (gapMs > 0 && now - last < gapMs) return false
+    if (gapMs > 0 && now - last < gapMs) {
+      const leftSec = Math.round((gapMs - (now - last)) / 1000)
+      log(`welcome skip ${user}: 同一个人 ${Math.round(gapMs / 60000)} 分钟内只欢迎一次，还要等 ${leftSec}s`)
+      return false
+    }
     welcomedRecently.set(user, now)
     if (welcomedRecently.size > 500) {
       const oldest = Array.from(welcomedRecently.entries()).sort((a, b) => a[1] - b[1])[0]
@@ -2372,6 +2376,40 @@ function addFastEnter(name) {
     }
   }
 
+  /* 抖音数据源看门狗：state=connected 但长时间一帧都没有，说明 WS 半死了，
+   * 这时弹幕/进场/点赞/礼物全都收不到（欢迎和感谢就"不触发"）。
+   * 判据看 last_frame_at 这串 HH:MM:SS 有没有动过。 */
+  let douyinFrameStamp = ''
+  let douyinFrameChangedAt = Date.now()
+  let douyinRestartAt = 0
+  async function douyinWatchdog(live) {
+    const d = live && typeof live.douyin === 'object' && live.douyin ? live.douyin : null
+    if (!d) return
+    if (d.mode !== 'live' && d.mode !== 'bridge') return
+    if (d.state === 'stopped') return
+    const stamp = String((d.gift_debug && d.gift_debug.last_frame_at) || d.last_message_at || '')
+    if (stamp !== douyinFrameStamp) {
+      douyinFrameStamp = stamp
+      douyinFrameChangedAt = Date.now()
+      return
+    }
+    const idleMs = Date.now() - douyinFrameChangedAt
+    const limitMs = 180000
+    if (idleMs < limitMs) return
+    if (Date.now() - douyinRestartAt < 300000) return
+    douyinRestartAt = Date.now()
+    douyinFrameChangedAt = Date.now()
+    log(`抖音数据源 ${Math.round(idleMs / 1000)}s 没收到任何帧（弹幕/进场/礼物都会丢），重启它`)
+    try {
+      await fetch(`${appBase()}/api/douyin/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(10000) })
+      const res = await fetch(`${appBase()}/api/douyin/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(30000) })
+      const body = await res.text()
+      log(`抖音数据源重启 -> ${body.slice(0, 160)}`)
+    } catch (error) {
+      log(`抖音数据源重启失败: ${error && error.message ? error.message : error}`)
+    }
+  }
+
   async function poll() {
     enforcePetWindows()
     if (!alive) return
@@ -2394,6 +2432,7 @@ function addFastEnter(name) {
       return
     }
     liveDownStreak = 0
+    void douyinWatchdog(live)
     const musicQueue = live && typeof live.music_queue === 'object' && live.music_queue ? live.music_queue : null
     const currentSong = musicQueue && typeof musicQueue.current === 'object' && musicQueue.current ? musicQueue.current : null
     state.live = {
@@ -3198,6 +3237,51 @@ function addFastEnter(name) {
         let body = {}
         try { body = await readJsonBody(req, 4096) } catch { body = {} }
         sendJson(res, await lookAtScreen({ question: body && body.question, emotion: body && body.emotion, file: body && (body.file || body.path) }))
+        return
+      }
+/** 自查用：欢迎/感谢为什么没触发，先看这里 */
+      if (pathname === '/dsh-live-pet/diag') {
+        let liveState = null
+        try { liveState = await fetchState(config) } catch (error) { liveState = { error: String(error && error.message ? error.message : error) } }
+        const d = liveState && liveState.douyin ? liveState.douyin : null
+        const now = Date.now()
+        const welcomeHour = welcomeBatchTimes.filter((at) => now - at <= 3600000).length
+        sendJson(res, {
+          ok: true,
+          douyin: d
+            ? {
+              mode: d.mode,
+              state: d.state,
+              messages: d.messages,
+              frames: d.frames,
+              reconnects: d.reconnects,
+              last_message_at: d.last_message_at,
+              last_frame_at: d.gift_debug ? d.gift_debug.last_frame_at : '',
+              last_error: d.last_error,
+              frame_idle_sec: douyinFrameStamp === '' ? 0 : Math.round((now - douyinFrameChangedAt) / 1000),
+            }
+            : null,
+          welcome: {
+            enabled: config.welcomeEnter === true,
+            fast: config.welcomeFast === true,
+            line: config.welcomeLine,
+            perHourLimit: Number(config.welcomeEnterPerHour) || 0,
+            perHourUsed: welcomeHour,
+            sameUserGapMin: Math.round((Number(config.welcomeEnterUserGapSec) || 0) / 60),
+            coolingUsers: welcomedRecently.size,
+            lastAt: lastWelcomeBatchAt ? new Date(lastWelcomeBatchAt).toISOString() : '',
+          },
+          thanks: {
+            follow: config.thanksFollow === true,
+            like: config.thanksLike === true,
+            gift: config.thanksGift === true,
+            likeLine: config.likeLine,
+            likeBatchSec: Math.round((Number(config.likeThanksGapSec) || 0)),
+            giftGapSec: Number(config.giftThanksGapSec) || 0,
+            giftUserGapSec: Number(config.giftThanksUserGapSec) || 0,
+          },
+          hint: '如果 douyin.state 不是 connected，或者 frame_idle_sec 很大，说明数据源没在收事件——欢迎/点赞/礼物都不会触发。插件每 3 分钟没帧会自动重连一次。',
+        })
         return
       }
       if (pathname === '/dsh-live-pet/usage' && req.method === 'GET') {
