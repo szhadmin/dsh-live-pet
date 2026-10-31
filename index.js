@@ -1706,6 +1706,9 @@ function speakFixed(text, emotion) {
     try {
       const speech = config.speak === false ? null : await synthesize(config, line)
       bump({
+        // 关键：必须带 slot，否则只更新全局 state，窗口轮询的 state.slots.a 没变化 →
+        // 气泡不显示、语音也不播（欢迎/关注/点赞/礼物的话术以前就是这样被吞掉的）
+        slot: 'a',
         status: 'speaking',
         say: line,
         emotion: mood,
