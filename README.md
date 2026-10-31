@@ -315,11 +315,25 @@ scripts/deploy.ps1            部署到本机 profile；scripts/reload.ps1 热�
 cordis.patch.yml              bundle patch
 ```
 
+## 让它看一眼你的桌面（视觉）
+
+宠物能真的"看见"屏幕：右键宠物 → **「看一眼桌面」**，等 4~7 秒，它就用自己的口气点评你屏幕上在干什么。
+也可以直接在输入条/弹幕里说「你看看我的屏幕」，它会先去看一眼再回答。
+
+- 原理：PowerShell + .NET 抓主屏 → 缩到 900px 宽存 PNG（约 700KB）→ 直接喂给带视觉能力的模型
+  （用配置里的 `provider` / `model` / `baseUrl` / `apiKey`）→ 拿回一句人设化的点评。
+- 实测 4~7 秒一句话；看完后 8 秒内连麦台词会让位，免得把这句话一秒盖掉。
+- 模型要支持看图（`image_url`）。思考型模型（如 `cn:deepseek-v4.1-flash`）记得关掉思考
+  （代码里已带 `reasoning_effort: 'none'`），否则 token 全花在 reasoning 上、正文是空的。
+- 接口：`POST /dsh-live-pet/see`（`{"question": "可选的自定义提问"}`），返回 `{ok, text, ms}`。
+- 隐私：截图只在本机内存/临时文件里过一手，用完立刻删除，不会长期留在磁盘上。
+
 ## 接口（本地 HTTP）
 
 | 路由 | 作用 |
 | --- | --- |
 | `GET /dsh-live-pet/state` | 宠物窗口轮询的状态（台词/情绪/音频/歌单） |
+| `POST /dsh-live-pet/see` | 看一眼主播的桌面（截图 + 视觉模型），结果直接进气泡 |
 | `GET|POST /dsh-live-pet/config` | 设置页读写配置（宠物配置 + 转发直播服务配置） |
 | `POST /dsh-live-pet/chat` | 窗口输入条发消息 |
 | `GET|POST /dsh-live-pet/live` | 托管直播服务的状态 / 启动 / 停止 / 重启 |

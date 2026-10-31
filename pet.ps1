@@ -1,4 +1,4 @@
-﻿﻿﻿#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
     小鲸鱼直播宠物 —— DSH 插件 dsh-live-pet 的"身体"。
 
@@ -1165,6 +1165,30 @@ function Hide-Input {
     $script:Box.Text = ''
 }
 
+# 让插件去截屏 + 看图，结果通过 state 推回来自己会说（这里只负责不卡界面地发请求）
+function Look-Desktop {
+    Show-Bubble '我看一眼…' 8000
+    Write-PetLog 'look desktop requested'
+    $url = $script:HostBase + '/see'
+    Start-Job -ArgumentList $url -ScriptBlock {
+        param($url)
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($url)
+            $request.Method = 'POST'
+            $request.ContentType = 'application/json; charset=utf-8'
+            $request.Timeout = 60000
+            $request.Proxy = $null
+            $body = [System.Text.Encoding]::UTF8.GetBytes('{}')
+            $request.ContentLength = $body.Length
+            $stream = $request.GetRequestStream()
+            $stream.Write($body, 0, $body.Length)
+            $stream.Close()
+            $response = $request.GetResponse()
+            $response.Close()
+        } catch { }
+    } | Out-Null
+}
+
 function Send-Chat([string]$Text) {
     $Text = ($Text -replace '\s+', ' ').Trim()
     if ($Text -eq '') { return }
@@ -2105,6 +2129,12 @@ $chatItem = New-Object System.Windows.Controls.MenuItem
 $chatItem.Header = '跟它说句话'
 $chatItem.Add_Click({ Show-Input })
 [void]$menu.Items.Add($chatItem)
+
+# 看一眼桌面：截图 + 视觉模型，结果由插件推回来（走正常说话那套）
+$lookItem = New-Object System.Windows.Controls.MenuItem
+$lookItem.Header = '看一眼桌面'
+$lookItem.Add_Click({ Look-Desktop })
+[void]$menu.Items.Add($lookItem)
 
 # 动作：主动让它演一个（动作库从插件 /poses 拿，设置页加了自定义动作这里会自动出现）
 $script:PoseMenu = New-Object System.Windows.Controls.MenuItem

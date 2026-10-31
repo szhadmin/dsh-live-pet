@@ -12,7 +12,7 @@
  * a separate process so a stuck turn can never block the Harness host.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -624,6 +624,85 @@ function resolveApiKey(config) {
     }
   } catch { /* 没有 .env 就算了 */ }
   return ''
+}
+
+/* ------------------------------------------- 看一眼主播的桌面（视觉）
+ * 思路：PowerShell + .NET 抓主屏 → 缩到 1000px 宽存 PNG → 直接喂给支持看图
+ * 的模型（config.provider/model/baseUrl/apiKey）→ 拿回一句话让人设化的点评。
+ * 注意：PowerShell 脚本写得越花哨越容易被 AMSI 判为恶意脚本拦住，这里保持极简。
+ */
+
+/** 抓一张主屏截图，成功返回文件路径 */
+function captureScreen(target) {
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
+    '$sc=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
+    '$bmp=New-Object System.Drawing.Bitmap($sc.Width,$sc.Height)',
+    '$g=[System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.CopyFromScreen($sc.X,$sc.Y,0,0,$bmp.Size)',
+    '$g.Dispose()',
+    '$w=900; $h=[int]($sc.Height*$w/$sc.Width)',
+    '$small=New-Object System.Drawing.Bitmap($w,$h)',
+    '$gs=[System.Drawing.Graphics]::FromImage($small)',
+    '$gs.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
+    '$gs.DrawImage($bmp,0,0,$w,$h)',
+    '$gs.Dispose(); $bmp.Dispose()',
+    `$small.Save('${target}',[System.Drawing.Imaging.ImageFormat]::Png)`,
+    '$small.Dispose()',
+    "Write-Output 'ok'",
+  ].join('\n')
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+    timeout: 25000,
+    windowsHide: true,
+    encoding: 'utf8',
+  })
+  if (result && result.error) throw new Error(`截图失败：${result.error.message}`)
+  if (!existsSync(target)) {
+    const tail = String((result && (result.stderr || result.stdout)) || '').trim().slice(-200)
+    throw new Error(`截图没生成${tail === '' ? '' : '：' + tail}`)
+  }
+  return target
+}
+
+/** 把截图交给视觉模型，拿回一句话 */
+async function describeScreen(config, question) {
+  const file = join(PKG_DIR, `screen-${Date.now()}.png`)
+  try {
+    captureScreen(file)
+    const base64 = readFileSync(file).toString('base64')
+    const key = resolveApiKey(config)
+    const base = String(config.baseUrl || 'https://api.deepseek.com/v1').replace(/\/+$/, '')
+    const body = {
+      model: String(config.model || 'deepseek-chat'),
+      max_tokens: 500,
+      temperature: 0.9,
+      // 这个模型默认会先长篇思考，视觉问答只要一句话：关掉思考又快又不空
+      reasoning_effort: 'none',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: question },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
+        ],
+      }],
+    }
+    // apiKey 走 Authorization 头，不放 body
+    const headers = { 'content-type': 'application/json' }
+    if (key !== '') headers.authorization = `Bearer ${key}`
+    const response = await fetch(`${base}/chat/completions`, { method: 'POST', headers, body: JSON.stringify(body) })
+    const text = await response.text()
+    if (!response.ok) throw new Error(`视觉接口 ${response.status}：${text.slice(0, 160)}`)
+    let json = null
+    try { json = JSON.parse(text) } catch { throw new Error(`视觉接口返回的不是 JSON：${text.slice(0, 120)}`) }
+    const choice = json && json.choices && json.choices[0] ? json.choices[0] : {}
+    const message = choice.message || {}
+    if (!message.content && choice.finish_reason === 'length') {
+      throw new Error('视觉模型把 token 都花在思考上了（finish=length），换个模型或调大 max_tokens')
+    }
+    return String(message.content || '').trim()
+  } finally {
+    try { rmSync(file, { force: true }) } catch { /* 删不掉就算了 */ }
+  }
 }
 
 /** First existing audio file for a `/audio/<name>.mp3` URL published by the live project. */
@@ -1368,7 +1447,37 @@ export function apply(ctx) {
     return payload
   }
 
-  function bump(update) {
+  /* 桌面感知：最近一次看了什么，供后续对话引用 */
+let lastScreen = { at: 0, text: '' }
+/** 看一眼桌面之后的保护期：这之前连麦台词先闭嘴 */
+let screenHoldUntil = 0
+
+async function lookAtScreen(options = {}) {
+  const me = state.slots.a || {}
+  const who = String(me.name || config.petName || '宠物')
+  const question = String(options.question || '').trim() || [
+    `你叫${who}，正陪主播直播，现在偷看了一眼主播的电脑屏幕。`,
+    '用一到两句话口语点评你看到的东西：在玩什么/在写什么/窗口乱不乱，可以吐槽。',
+    '不要罗列窗口清单，不要念文件名，40 字以内。',
+  ].join('')
+  const started = Date.now()
+  try {
+    const text = await describeScreen(config, question)
+    if (text === '') return { ok: false, error: '模型没返回内容' }
+    lastScreen = { at: Date.now(), text }
+    // 8 秒内别让连麦/主动说话把它盖掉，老板得看清它说了啥
+    screenHoldUntil = Date.now() + 8000
+    bump({ say: text, emotion: String(options.emotion || 'mischievous'), status: 'speaking', turns: (Number(state.turns) || 0) + 1 })
+    log(`screen look (${Math.round((Date.now() - started) / 100) / 10}s): ${text.replace(/\s+/g, ' ').slice(0, 140)}`)
+    return { ok: true, text, ms: Date.now() - started }
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error)
+    log(`screen look failed: ${message}`)
+    return { ok: false, error: message }
+  }
+}
+
+function bump(update) {
     const patch = update && typeof update === 'object' ? update : {}
     const slot = patch.slot === 'b' ? 'b' : patch.slot === 'a' ? 'a' : ''
     const rest = { ...patch }
@@ -1670,6 +1779,18 @@ function addFastEnter(name) {
     const personaText = customPersona !== '' ? customPersona : fallbackPersona
     const personaLabel = customPersona !== '' ? '老板设定的人设' : '你的人设'
     prompt = `【${personaLabel}（最高优先，和别的设定冲突时以此为准；不要向观众念这段）】\n${personaText}\n\n${prompt}`
+    // 老板让你「看看桌面/屏幕」时先真去看一眼，再把看到的内容塞进这一轮
+    if (bullet.chat === true && /(看|瞄|瞅).{0,4}(桌面|屏幕|电脑)|屏幕上|你看到|看看我在/.test(String(bullet.text || ''))) {
+      try {
+        if (Date.now() - lastScreen.at > 15000) {
+          const seen = await lookAtScreen({})
+          if (seen.ok !== true) log(`screen look for chat failed: ${seen.error}`)
+        }
+        if (lastScreen.text !== '') prompt = `【你刚看了一眼主播的桌面：${lastScreen.text}】\n\n${prompt}`
+      } catch (error) {
+        log(`screen context failed: ${error && error.message ? error.message : error}`)
+      }
+    }
 
     const attempt = async (sessionId, timeoutOverride) => {
       const args = [dsh.bin, me.profile, '--json']
@@ -1970,6 +2091,11 @@ function addFastEnter(name) {
 
   async function banterTick() {
     if (!multiAgentOn() || !alive) return
+    // 刚看完桌面：让它的「我看到了什么」先待在气泡里
+    if (Date.now() < screenHoldUntil) {
+      scheduleBanter(screenHoldUntil - Date.now() + 500)
+      return
+    }
     const team = config.multiAgent || {}
     const now = Date.now()
     if (state.status === 'offline') {
@@ -2890,7 +3016,13 @@ function addFastEnter(name) {
         return
       }
       /* ---- token 用量 ---------------------------------------------------- */
-      if (pathname === '/dsh-live-pet/usage') {
+      if (pathname === '/dsh-live-pet/see' && req.method === 'POST') {
+        let body = {}
+        try { body = await readJsonBody(req, 4096) } catch { body = {} }
+        sendJson(res, await lookAtScreen({ question: body && body.question, emotion: body && body.emotion }))
+        return
+      }
+      if (pathname === '/dsh-live-pet/usage' && req.method === 'GET') {
         if (searchParams.get('reset') === '1') {
           const since = Date.now()
           state.usage = { turns: 0, turnsA: 0, turnsB: 0, input: 0, output: 0, cacheRead: 0, total: 0, lastAt: 0, last: null, since }
