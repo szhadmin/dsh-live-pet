@@ -56,6 +56,7 @@ const PET_CONFIG_KEYS = [
   'gamePort',
   'gameLevel',
   'gamePos',
+  'gameLayer',
   'sceneEnabled',
   'sceneImage',
   'sceneMinimized',
@@ -184,7 +185,9 @@ const DEFAULTS = {
   /** 打第几关（0~5，默认 1 = 白天前院） */
   gameLevel: 1,
   /** 游戏窗口放哪："x,y" */
-  gamePos: '1080,180',
+  gamePos: '1060,300',
+  /** 游戏窗口在哪一层：desktop=桌面背景层（无边框、不抢焦点、压在最下面）；topmost=盖在最上面；wallpaper=塞进壁纸层（实验） */
+  gameLayer: 'desktop',
   maxChars: 70,
   /** The owner's typed questions get room to answer (they may report tool results). */
   chatMaxChars: 240,
@@ -1789,8 +1792,14 @@ function pvzPort() {
 }
 
 function pvzPos() {
-  const rawPos = String(config.gamePos || '1080,180')
-  return /^\d+,\d+$/.test(rawPos) ? rawPos : '1080,180'
+  const rawPos = String(config.gamePos || '1060,300')
+  return /^\d+,\d+$/.test(rawPos) ? rawPos : '1060,300'
+}
+
+/** desktop=桌面背景层（默认）/ topmost=盖最上面 / wallpaper=塞壁纸层（实验） */
+function pvzLayer() {
+  const raw = String(config.gameLayer || 'desktop').trim()
+  return ['desktop', 'topmost', 'wallpaper'].includes(raw) ? raw : 'desktop'
 }
 
 function gamePayload() {
@@ -1942,7 +1951,7 @@ async function startGame(byUser) {
     pvz.port = port
     pvz.base = `http://127.0.0.1:${port}`
     const level = Math.max(0, Math.min(5, Number(config.gameLevel) || 1))
-    const args = [paths.bridge, '--game-root', paths.gameDir, '--port', String(port), '--level', String(level), '--pos', pvzPos()]
+    const args = [paths.bridge, '--game-root', paths.gameDir, '--port', String(port), '--level', String(level), '--pos', pvzPos(), '--layer', pvzLayer()]
     const out = join(PKG_DIR, 'pvz.log')
     const child = spawn('python', args, {
       cwd: paths.gameDir,

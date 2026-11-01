@@ -29,6 +29,7 @@ GAME = {
     'target': None,       # 临时告诉 canSeedPlant 该落在哪一格
     'error': '',
     'last_cmd': '',
+    'win': {},            # 窗口挂到哪一层了（调试用）
     'started_at': 0,
 }
 
@@ -83,6 +84,7 @@ def build_server(port, menubar, constants):
             'lose': state_name == constants.GAME_LOSE,
             'error': GAME['error'],
             'last_cmd': GAME['last_cmd'],
+            'win': GAME.get('win', {}),
         }
 
     class Handler(BaseHTTPRequestHandler):
@@ -187,8 +189,17 @@ def main():
     parser.add_argument('--level', type=int, default=1)
     parser.add_argument('--pos', default='1080,180')
     parser.add_argument('--cards', default='0,1,3,4')
+    parser.add_argument('--layer', default='desktop', choices=['desktop', 'wallpaper', 'topmost', 'window', 'background'])
+    parser.add_argument('--width', type=int, default=800)
+    parser.add_argument('--height', type=int, default=600)
     parser.add_argument('--no-topmost', action='store_true')
     args = parser.parse_args()
+    if args.no_topmost:
+        args.layer = 'desktop'
+    if args.layer == 'window':
+        args.layer = 'desktop'
+    if args.layer == 'background':
+        args.layer = 'wallpaper'
 
     root = os.path.abspath(args.game_root)
     os.chdir(root)
@@ -216,42 +227,168 @@ def main():
 
     card_indices = [int(part) for part in str(args.cards).split(',') if part.strip() != '']
 
-    # 0) 窗口钉在最上面 + 改个标题，不然会被别的程序盖住。
+    # 0) 窗口摆法：background＝塞进桌面壁纸层（在图标后面，当桌面背景）
+    #    window＝普通窗口，topmost＝钉在最上面。
     #    注意：pygame/SDL 只能在主线程摸，所以 hwnd 在这里取一次，
     #    之后后台线程只用 Win32（纯 ctypes），不然会把游戏线程卡死。
     import ctypes
+    from ctypes import wintypes
 
+    user32 = ctypes.windll.user32
     pos_x, pos_y = [int(v) for v in args.pos.split(',')]
     HWND_TOPMOST = -1
+    HWND_NOTOPMOST = -2
+    HWND_BOTTOM = 1
     SWP_NOSIZE = 0x0001
+    SWP_NOACTIVATE = 0x0010
     SWP_SHOWWINDOW = 0x0040
+    WS_CHILD = 0x40000000
+    WS_VISIBLE = 0x10000000
+    WS_POPUP = 0x80000000
+    WS_CAPTION_BITS = 0x00C00000   # WS_BORDER | WS_DLGFRAME
+    WS_EX_NOACTIVATE = 0x08000000
+    WS_EX_TOOLWINDOW = 0x00000080
+    WS_EX_APPWINDOW = 0x00040000
+    GWL_STYLE = -16
+    GWL_EXSTYLE = -20
     try:
         hwnd = int(pg.display.get_wm_info().get('window') or 0)
     except Exception:  # noqa: BLE001
         hwnd = 0
 
-    def pin_once():
+    # Win32 原型（64 位下不声明 restype 会把 HWND 截断成 int，直接找不到窗口）
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowExW.restype = wintypes.HWND
+    user32.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.EnumWindows.argtypes = [ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM), wintypes.LPARAM]
+    user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                           wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_ulonglong)]
+    user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    user32.SetParent.argtypes = [wintypes.HWND, wintypes.HWND]
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetParent.argtypes = [wintypes.HWND]
+    user32.GetParent.restype = wintypes.HWND
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+
+    wallpaper = {'layer': 0, 'spawned': False, 'warned': False}
+
+    def screen_area():
+        return int(user32.GetSystemMetrics(0)) * int(user32.GetSystemMetrics(1))
+
+    def pick_workerw_under_icons():
+        """在 Progman 的子窗口里挑“图标后面那层 WorkerW”：可见 + 铺满屏幕。"""
+        progman = user32.FindWindowW('Progman', None)
+        if not progman:
+            return 0
+        if not wallpaper['spawned']:
+            # 只踢一次：让 explorer 生成 WorkerW（多踢几次会生出一堆没用的 WorkerW）
+            for lparam in (0, 1):
+                user32.SendMessageTimeoutW(progman, 0x052C, 0xD, lparam, 0, 2000, None)
+            wallpaper['spawned'] = True
+        need = screen_area() * 0.5
+        child = user32.FindWindowExW(progman, None, 'WorkerW', None)
+        while child:
+            rect = wintypes.RECT()
+            user32.GetWindowRect(child, ctypes.byref(rect))
+            area = (rect.right - rect.left) * (rect.bottom - rect.top)
+            if user32.IsWindowVisible(child) and area >= need:
+                return child
+            child = user32.FindWindowExW(progman, child, 'WorkerW', None)
+        return 0
+
+    def find_wallpaper_layer():
+        """桌面图标后面那层 WorkerW：塞进去就是“桌面壁纸”。
+
+        本机（Win11）布局：Progman -> [SHELLDLL_DefView, WorkerW]
+        老布局：顶层某窗口挂着 SHELLDLL_DefView，它后面紧跟一个 WorkerW
+        """
+        try:
+            worker = pick_workerw_under_icons()
+            if worker:
+                return worker
+            found = []
+
+            @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            def callback(win, _):
+                if user32.FindWindowExW(win, None, 'SHELLDLL_DefView', None):
+                    sibling = user32.FindWindowExW(None, win, 'WorkerW', None)
+                    if sibling:
+                        found.append(sibling)
+                return True
+
+            user32.EnumWindows(callback, 0)
+            return found[0] if found else 0
+        except Exception as exc:  # noqa: BLE001
+            print('[pvz] find layer failed: %r' % (exc,), flush=True)
+            return 0
+
+    def to_background():
+        """子窗口方式挂到壁纸层：图标在上、别的窗口也在上，游戏就在桌面背景里跑。"""
+        if hwnd == 0:
+            return False
+        layer = find_wallpaper_layer()
+        if not layer:
+            print('[pvz] no WorkerW layer found, fallback to bottom window', flush=True)
+            return False
+        if int(user32.GetParent(hwnd) or 0) != int(layer):
+            style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+            user32.SetWindowLongW(hwnd, GWL_STYLE, (int(style) & ~0x80C00000) | WS_CHILD | WS_VISIBLE)
+            prev = user32.SetParent(hwnd, layer)
+            print('[pvz] reparent -> WorkerW %s (prev %s)' % (layer, prev), flush=True)
+        user32.ShowWindow(hwnd, 5)
+        user32.SetWindowPos(hwnd, 0, pos_x, pos_y, int(args.width), int(args.height), SWP_SHOWWINDOW | SWP_NOACTIVATE)
+        visible = bool(user32.IsWindowVisible(hwnd))
+        GAME['win'] = {'mode': 'background', 'hwnd': int(hwnd), 'parent': int(layer), 'visible': visible,
+                       'x': pos_x, 'y': pos_y, 'w': int(args.width), 'h': int(args.height)}
+        if not visible and not wallpaper['warned']:
+            wallpaper['warned'] = True
+            print('[pvz] still hidden after reparent (parent not visible?)', flush=True)
+        return True
+
+    def as_window(topmost):
+        """普通窗口：topmost=盖在最上面；否则无边框 + 不进任务栏 + 不吃焦点 + 压到最底层（当桌面背景）。"""
         if hwnd == 0:
             return
         try:
-            ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW：父进程用 SW_HIDE 起我们时窗口是隐藏的
-            ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, pos_x, pos_y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW)
-        except Exception:  # noqa: BLE001
-            pass
+            if not topmost:
+                ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (int(ex) | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW)
+                style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+                user32.SetWindowLongW(hwnd, GWL_STYLE, (int(style) & ~WS_CAPTION_BITS) | WS_POPUP | WS_VISIBLE)
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW：父进程用 SW_HIDE 起我们时窗口是隐藏的
+            user32.SetWindowPos(hwnd, HWND_TOPMOST if topmost else HWND_BOTTOM, pos_x, pos_y,
+                                int(args.width), int(args.height), SWP_SHOWWINDOW | SWP_NOACTIVATE)
+            GAME['win'] = {'mode': 'topmost' if topmost else 'desktop', 'hwnd': int(hwnd), 'parent': 0,
+                           'visible': bool(user32.IsWindowVisible(hwnd)),
+                           'x': pos_x, 'y': pos_y, 'w': int(args.width), 'h': int(args.height)}
+        except Exception as exc:  # noqa: BLE001
+            print('[pvz] place window failed: %r' % (exc,), flush=True)
+
+    def place():
+        if args.layer == 'topmost':
+            as_window(True)
+            return
+        if args.layer == 'wallpaper' and to_background() and user32.IsWindowVisible(hwnd):
+            return
+        as_window(False)  # 默认：无边框、压在所有窗口下面 → 相当于桌面背景
 
     def keep_visible():
-        # 前 8 秒反复确认窗口是显示状态（启动方式不同，首个窗口可能被建出来就是隐藏的）
+        # 前 8 秒反复确认（有的启动方式会把首个窗口建成隐藏的；explorer 也可能重建 WorkerW）
         for _ in range(16):
-            pin_once()
+            place()
             time.sleep(0.5)
 
-    pin_once()
+    place()
     try:
         pg.display.set_caption('植物大战僵尸 · 小海豚在打')
     except Exception:  # noqa: BLE001
         pass
-    if not args.no_topmost:
-        threading.Thread(target=keep_visible, daemon=True).start()
+    threading.Thread(target=keep_visible, daemon=True).start()
 
     # 1) 跳过选卡，直接开打
     def init_state(self):
