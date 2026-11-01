@@ -292,6 +292,14 @@ $script:SceneBgBrush = New-Object System.Windows.Media.ImageBrush
 $script:SceneBgBrush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
 $script:SceneBg.Background = $script:SceneBgBrush
 
+# ---- 游戏画面当背景板（植物大战僵尸嵌进宠物窗口的背景里） ----
+$script:GameBgOn = $false
+$script:GameBgUrl = ''
+$script:GameBgClient = $null
+$script:GameBgFails = 0
+$script:GameBgTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:GameBgTimer.Interval = [TimeSpan]::FromMilliseconds(220)
+
 $script:PoolPanel = New-Object System.Windows.Controls.Border
 $script:PoolPanel.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(210, 8, 14, 24))
 $script:PoolPanel.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(90, 255, 255, 255))
@@ -1610,6 +1618,70 @@ function Add-PoolRow($item, [int]$ageFromNewest, [int]$total) {
 }
 
 # 刷新左上弹幕池 / 右上点歌台 / 左下场次数据
+# 把游戏画面当背景：小海豚窗口的底图就是正在打的这一局
+function Update-GameBackdrop($game) {
+    if ($script:IsSlotB) { return }
+    $active = $false
+    if ($null -ne $game -and ($game.PSObject.Properties.Name -contains 'active')) { $active = [bool]$game.active }
+    $url = ''
+    if ($active -and ($game.PSObject.Properties.Name -contains 'frameUrl')) { $url = [string]$game.frameUrl }
+    if ([string]::IsNullOrWhiteSpace($url)) {
+        if ($script:GameBgOn) { Stop-GameBackdrop }
+        return
+    }
+    $script:GameBgUrl = $url
+    if (-not $script:GameBgOn) {
+        $script:GameBgOn = $true
+        $script:GameBgFails = 0
+        $script:GameBgClient = New-Object System.Net.WebClient
+        $script:SceneBg.Visibility = 'Visible'
+        $script:GameBgTimer.Start()
+        Write-PetLog ('game backdrop on -> ' + $url)
+    }
+}
+
+function Stop-GameBackdrop {
+    $script:GameBgOn = $false
+    $script:GameBgTimer.Stop()
+    $script:SceneBgBrush.ImageSource = $null
+    $script:BgLoaded = ''
+    if (-not $script:SceneMode) { $script:SceneBg.Visibility = 'Collapsed' }
+    if ($null -ne $script:GameBgClient) { try { $script:GameBgClient.Dispose() } catch { } }
+    $script:GameBgClient = $null
+    Write-PetLog 'game backdrop off'
+}
+
+function Update-GameFrame {
+    if (-not $script:GameBgOn) { return }
+    if ([string]::IsNullOrWhiteSpace($script:GameBgUrl)) { return }
+    $w = [int]$script:Window.Width
+    $h = [int]$script:Window.Height
+    if ($w -lt 60 -or $h -lt 60) { return }
+    if ($w -gt 1280) {
+        $h = [int][Math]::Round($h * 1280.0 / $w)
+        $w = 1280
+    }
+    $url = $script:GameBgUrl + '?w=' + $w + '&h=' + $h + '&bias=0.55'
+    try {
+        $bytes = $script:GameBgClient.DownloadData($url)
+        if ($null -eq $bytes -or $bytes.Length -lt 512) { throw '空帧' }
+        $stream = New-Object System.IO.MemoryStream(, $bytes)
+        $bitmap = New-Object System.Windows.Media.Imaging.BitmapImage
+        $bitmap.BeginInit()
+        $bitmap.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $bitmap.StreamSource = $stream
+        $bitmap.EndInit()
+        $bitmap.Freeze()
+        $script:SceneBgBrush.ImageSource = $bitmap
+        $stream.Dispose()
+        $script:GameBgFails = 0
+    } catch {
+        $script:GameBgFails = $script:GameBgFails + 1
+        if ($script:GameBgFails -eq 3) { Write-PetLog ('game backdrop frame failed: ' + $_.Exception.Message) }
+        if ($script:GameBgFails -gt 25) { Stop-GameBackdrop }
+    }
+}
+
 function Update-ScenePanels($state) {
     if (-not $script:SceneMode) { return }
 
@@ -2098,7 +2170,10 @@ function Apply-State($state) {
         return
     }
     # 掌机游戏：有局面就画出来（画面变了才重绘）
-    if ($state.PSObject.Properties.Name -contains 'game') { Update-GameConsole $state.game }
+    if ($state.PSObject.Properties.Name -contains 'game') {
+        Update-GameConsole $state.game
+        Update-GameBackdrop $state.game
+    }
     # 溜达配置由插件下发（每轮都读一次，改了设置立刻生效，不用重启窗口）
     if ($state.PSObject.Properties.Name -contains 'wander') {
         $w = $state.wander
@@ -2619,6 +2694,7 @@ $script:PartnerHideTimer.Add_Tick({ $script:PartnerHideTimer.Stop(); $script:Par
 $script:PartnerWalkTimer.Interval = [TimeSpan]::FromMilliseconds(60)
 $script:PartnerWalkTimer.Add_Tick({ Step-PartnerWalk })
 $script:Poll.Interval = [TimeSpan]::FromMilliseconds(700)
+$script:GameBgTimer.Add_Tick({ Update-GameFrame })
 $script:Poll.Add_Tick({ Apply-State (Fetch-State) })
 
 $script:Window.Add_Closed({

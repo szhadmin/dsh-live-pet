@@ -186,8 +186,8 @@ const DEFAULTS = {
   gameLevel: 1,
   /** 游戏窗口放哪："x,y" */
   gamePos: '1060,300',
-  /** 游戏窗口在哪一层：desktop=桌面背景层（无边框、不抢焦点、压在最下面）；topmost=盖在最上面；wallpaper=塞进壁纸层（实验） */
-  gameLayer: 'desktop',
+  /** 游戏窗口在哪一层：offscreen=不出自己的窗口，画面嵌进宠物窗口当背景（默认）；desktop=桌面背景层（无边框、不抢焦点、压在最下面）；topmost=盖在最上面；wallpaper=塞进壁纸层（实验） */
+  gameLayer: 'offscreen',
   maxChars: 70,
   /** The owner's typed questions get room to answer (they may report tool results). */
   chatMaxChars: 240,
@@ -1799,7 +1799,7 @@ function pvzPos() {
 /** desktop=桌面背景层（默认）/ topmost=盖最上面 / wallpaper=塞壁纸层（实验） */
 function pvzLayer() {
   const raw = String(config.gameLayer || 'desktop').trim()
-  return ['desktop', 'topmost', 'wallpaper'].includes(raw) ? raw : 'desktop'
+  return ['offscreen', 'desktop', 'topmost', 'wallpaper'].includes(raw) ? raw : 'offscreen'
 }
 
 function gamePayload() {
@@ -1820,6 +1820,8 @@ function gamePayload() {
     planted: pvz.planted,
     result: pvz.result,
     frame: [],
+    /** 宠物窗口把这个当背景板（实时游戏画面） */
+    frameUrl: pvz.active === true && pvz.base !== '' ? `${pvz.base}/frame.png` : '',
   }
 }
 

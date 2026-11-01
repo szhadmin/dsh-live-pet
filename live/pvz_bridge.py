@@ -16,6 +16,7 @@
 """
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -34,7 +35,7 @@ GAME = {
 }
 
 
-def build_server(port, menubar, constants):
+def build_server(port, menubar, constants, grab_frame):
     plant_names = menubar.plant_name_list
 
     def snapshot():
@@ -105,6 +106,33 @@ def build_server(port, menubar, constants):
                     self._send(snapshot())
                 except Exception as exc:  # noqa: BLE001
                     self._send({'ready': False, 'error': repr(exc)}, 500)
+                return
+            if self.path.startswith('/frame.png'):
+                # 把游戏画面裁成调用方要的比例，给宠物窗口当背景板用
+                try:
+                    query = {}
+                    if '?' in self.path:
+                        for part in self.path.split('?', 1)[1].split('&'):
+                            if '=' in part:
+                                k, v = part.split('=', 1)
+                                query[k] = v
+                    width = max(80, min(1600, int(float(query.get('w', '320')))))
+                    height = max(60, min(1200, int(float(query.get('h', '400')))))
+                    bias = max(0.0, min(1.0, float(query.get('bias', '0.55'))))
+                    data = grab_frame(width, height, bias)
+                    if data is None:
+                        self._send({'ok': False, 'error': 'no surface'}, 503)
+                        return
+                    self.send_response(200)
+                    self.send_header('content-type', 'image/jpeg')
+                    self.send_header('cache-control', 'no-store')
+                    self.send_header('content-length', str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except BrokenPipeError:
+                    pass
+                except Exception as exc:  # noqa: BLE001
+                    self._send({'ok': False, 'error': repr(exc)}, 500)
                 return
             if self.path.startswith('/health'):
                 self._send({'ok': True})
@@ -189,7 +217,8 @@ def main():
     parser.add_argument('--level', type=int, default=1)
     parser.add_argument('--pos', default='1080,180')
     parser.add_argument('--cards', default='0,1,3,4')
-    parser.add_argument('--layer', default='desktop', choices=['desktop', 'wallpaper', 'topmost', 'window', 'background'])
+    parser.add_argument('--layer', default='desktop',
+                        choices=['desktop', 'wallpaper', 'topmost', 'window', 'background', 'offscreen'])
     parser.add_argument('--width', type=int, default=800)
     parser.add_argument('--height', type=int, default=600)
     parser.add_argument('--no-topmost', action='store_true')
@@ -208,6 +237,9 @@ def main():
 
     x, y = args.pos.split(',')
     os.environ['SDL_VIDEO_WINDOW_POS'] = '%s,%s' % (x.strip(), y.strip())
+    if args.layer == 'offscreen':
+        # 不出自己的窗口，把画面交给宠物窗口当背景（dummy 驱动：照样渲染，只是不显示）
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
 
     import time
     import pygame as pg  # noqa: F401  (本文件顶部已确认可用)
@@ -383,12 +415,34 @@ def main():
             place()
             time.sleep(0.5)
 
-    place()
-    try:
-        pg.display.set_caption('植物大战僵尸 · 小海豚在打')
-    except Exception:  # noqa: BLE001
-        pass
-    threading.Thread(target=keep_visible, daemon=True).start()
+    if args.layer != 'offscreen':
+        place()
+        try:
+            pg.display.set_caption('植物大战僵尸 · 小海豚在打')
+        except Exception:  # noqa: BLE001
+            pass
+        threading.Thread(target=keep_visible, daemon=True).start()
+
+    def grab_frame(width, height, bias):
+        """裁一块当前画面、缩到指定尺寸，编码成 PNG（给宠物窗口当背景板）。"""
+        surface = pg.display.get_surface()
+        if surface is None:
+            return None
+        sw, sh = surface.get_size()
+        ratio = float(width) / float(height)
+        crop_h = sh
+        crop_w = int(round(sh * ratio))
+        if crop_w > sw:
+            crop_w = sw
+            crop_h = int(round(sw / ratio))
+        left = int(round((sw - crop_w) * min(1.0, max(0.0, bias))))
+        left = max(0, min(sw - crop_w, left))
+        top = max(0, (sh - crop_h) // 2)
+        piece = surface.subsurface((left, top, crop_w, crop_h)).copy()
+        small = pg.transform.smoothscale(piece, (width, height))
+        buffer = io.BytesIO()
+        pg.image.save(small, buffer, 'frame.jpg')
+        return buffer.getvalue()
 
     # 1) 跳过选卡，直接开打
     def init_state(self):
@@ -434,7 +488,7 @@ def main():
 
     level_mod.Level.play = play
 
-    server, _ = build_server(args.port, menubar, c)
+    server, _ = build_server(args.port, menubar, c, grab_frame)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print('bridge listening on 127.0.0.1:%d (level %d)' % (args.port, args.level), flush=True)
 
