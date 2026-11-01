@@ -168,6 +168,7 @@ const SECTIONS = [
       { key: 'gameModeEnabled', label: '开游戏模式', type: 'bool', hint: '弹幕或你自己说「玩个游戏」就开一局；同一个口令不会打断正在打的那局' },
       { key: 'gameModeVoice', label: '开局/过关/结束要出声', type: 'bool', hint: '关掉只弹气泡，不合成语音（省 TTS 时间）' },
       { key: 'gameModeQuipEverySec', label: '边打边吐槽的间隔（秒）', type: 'number', hint: '默认 9 秒一句，只弹气泡不发音' },
+      { key: 'gameBackdropWidth', label: '游戏画面占背景宽度（%）', type: 'number', hint: '默认 62：只占背景一块（4:3），四周留白/留原场景；100 = 铺满' },
       { key: 'gameLayer', label: '游戏画面放哪', type: 'select', options: [['offscreen', '嵌进宠物窗口当背景（默认）'], ['desktop', '单独的桌面背景窗口'], ['topmost', '最上层窗口（盖住所有窗口）'], ['wallpaper', '壁纸层（实验，图标后面）']] },
       { key: 'gameLevel', label: '打第几关', type: 'number', hint: '0~5：1 是白天前院（默认），数字越大僵尸越猛' },
       { key: 'gamePort', label: '游戏接口端口', type: 'number', hint: '默认 8794 本机回环；被占就换一个' },

@@ -292,6 +292,20 @@ $script:SceneBgBrush = New-Object System.Windows.Media.ImageBrush
 $script:SceneBgBrush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
 $script:SceneBg.Background = $script:SceneBgBrush
 
+# 游戏画面不是铺满背景，而是背景里的一块“屏幕”
+$script:GamePanel = New-Object System.Windows.Controls.Border
+$script:GamePanel.Visibility = 'Collapsed'
+$script:GamePanel.CornerRadius = [System.Windows.CornerRadius]::new(14)
+$script:GamePanel.BorderThickness = [System.Windows.Thickness]::new(2)
+$script:GamePanel.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb(120, 255, 255, 255))
+$script:GamePanelBrush = New-Object System.Windows.Media.ImageBrush
+$script:GamePanelBrush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
+$script:GamePanel.Background = $script:GamePanelBrush
+$script:GamePanel.ClipToBounds = $true
+$script:GameBgScale = 0.62
+$script:GamePanelW = 0
+$script:GamePanelH = 0
+
 # ---- 游戏画面当背景板（植物大战僵尸嵌进宠物窗口的背景里） ----
 $script:GameBgOn = $false
 $script:GameBgUrl = ''
@@ -496,6 +510,7 @@ $script:Window.ResizeMode = [System.Windows.ResizeMode]::NoResize
 $script:Window.WindowStartupLocation = [System.Windows.WindowStartupLocation]::Manual
 $root = New-Object System.Windows.Controls.Grid
 [void]$root.Children.Add($script:SceneBg)
+[void]$root.Children.Add($script:GamePanel)
 [void]$root.Children.Add($script:PoolPanel)
 [void]$root.Children.Add($script:SongPanel)
 [void]$root.Children.Add($script:StatsPanel)
@@ -1619,6 +1634,38 @@ function Add-PoolRow($item, [int]$ageFromNewest, [int]$total) {
 
 # 刷新左上弹幕池 / 右上点歌台 / 左下场次数据
 # 把游戏画面当背景：小海豚窗口的底图就是正在打的这一局
+# 摆那块“游戏屏幕”：背景里只占一部分，剩下的留空/留原场景
+function Resize-GamePanel {
+    $winW = [double]$script:Window.Width
+    $winH = [double]$script:Window.Height
+    if ($winW -lt 80 -or $winH -lt 80) { return }
+    if ($script:SceneMode) {
+        $pw = [int][Math]::Round($winW * $script:GameBgScale)
+        $ph = [int][Math]::Round($pw * 3.0 / 4.0)
+        $maxH = [int][Math]::Round($winH * 0.82)
+        if ($ph -gt $maxH) {
+            $ph = $maxH
+            $pw = [int][Math]::Round($ph * 4.0 / 3.0)
+        }
+        $script:GamePanel.Width = [double]$pw
+        $script:GamePanel.Height = [double]$ph
+        $script:GamePanel.HorizontalAlignment = 'Center'
+        $script:GamePanel.VerticalAlignment = 'Center'
+        $script:GamePanel.Margin = New-Object System.Windows.Thickness(0, 0, 0, 30)
+    } else {
+        # 宠物小窗口里就整块当背景
+        $pw = [int]$winW
+        $ph = [int]$winH
+        $script:GamePanel.Width = [double]::NaN
+        $script:GamePanel.Height = [double]::NaN
+        $script:GamePanel.HorizontalAlignment = 'Stretch'
+        $script:GamePanel.VerticalAlignment = 'Stretch'
+        $script:GamePanel.Margin = New-Object System.Windows.Thickness(0)
+    }
+    $script:GamePanelW = $pw
+    $script:GamePanelH = $ph
+}
+
 function Update-GameBackdrop($game) {
     if ($script:IsSlotB) { return }
     $active = $false
@@ -1634,7 +1681,8 @@ function Update-GameBackdrop($game) {
         $script:GameBgOn = $true
         $script:GameBgFails = 0
         $script:GameBgClient = New-Object System.Net.WebClient
-        $script:SceneBg.Visibility = 'Visible'
+        Resize-GamePanel
+        $script:GamePanel.Visibility = 'Visible'
         $script:GameBgTimer.Start()
         Write-PetLog ('game backdrop on -> ' + $url)
     }
@@ -1643,9 +1691,10 @@ function Update-GameBackdrop($game) {
 function Stop-GameBackdrop {
     $script:GameBgOn = $false
     $script:GameBgTimer.Stop()
+    $script:GamePanelBrush.ImageSource = $null
+    $script:GamePanel.Visibility = 'Collapsed'
     $script:SceneBgBrush.ImageSource = $null
     $script:BgLoaded = ''
-    if (-not $script:SceneMode) { $script:SceneBg.Visibility = 'Collapsed' }
     if ($null -ne $script:GameBgClient) { try { $script:GameBgClient.Dispose() } catch { } }
     $script:GameBgClient = $null
     Write-PetLog 'game backdrop off'
@@ -1654,8 +1703,9 @@ function Stop-GameBackdrop {
 function Update-GameFrame {
     if (-not $script:GameBgOn) { return }
     if ([string]::IsNullOrWhiteSpace($script:GameBgUrl)) { return }
-    $w = [int]$script:Window.Width
-    $h = [int]$script:Window.Height
+    Resize-GamePanel
+    $w = [int]$script:GamePanelW
+    $h = [int]$script:GamePanelH
     if ($w -lt 60 -or $h -lt 60) { return }
     if ($w -gt 1280) {
         $h = [int][Math]::Round($h * 1280.0 / $w)
@@ -1672,7 +1722,7 @@ function Update-GameFrame {
         $bitmap.StreamSource = $stream
         $bitmap.EndInit()
         $bitmap.Freeze()
-        $script:SceneBgBrush.ImageSource = $bitmap
+        $script:GamePanelBrush.ImageSource = $bitmap
         $stream.Dispose()
         $script:GameBgFails = 0
     } catch {
@@ -2208,6 +2258,10 @@ function Apply-State($state) {
             $script:SceneDisplay = $display
         }
         Set-SceneMode ($display -eq 'full') ([string]$sc.imagePath)
+        if ($sc.PSObject.Properties.Name -contains 'gameWidth') {
+            $pct = [double]$sc.gameWidth
+            if ($pct -ge 20 -and $pct -le 100) { $script:GameBgScale = $pct / 100.0 }
+        }
         $poolFont = [double]$sc.poolFontSize
         if ($poolFont -ge 10 -and $poolFont -le 60 -and [Math]::Abs($poolFont - $script:PoolFontSize) -gt 0.1) {
             $script:PoolFontSize = $poolFont

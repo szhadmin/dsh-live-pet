@@ -57,6 +57,7 @@ const PET_CONFIG_KEYS = [
   'gameLevel',
   'gamePos',
   'gameLayer',
+  'gameBackdropWidth',
   'sceneEnabled',
   'sceneImage',
   'sceneMinimized',
@@ -186,6 +187,8 @@ const DEFAULTS = {
   gameLevel: 1,
   /** 游戏窗口放哪："x,y" */
   gamePos: '1060,300',
+  /** 游戏画面在背景里占多宽（百分比，20~100，默认 62：只占一块，不全铺） */
+  gameBackdropWidth: 62,
   /** 游戏窗口在哪一层：offscreen=不出自己的窗口，画面嵌进宠物窗口当背景（默认）；desktop=桌面背景层（无边框、不抢焦点、压在最下面）；topmost=盖在最上面；wallpaper=塞进壁纸层（实验） */
   gameLayer: 'offscreen',
   maxChars: 70,
@@ -3045,6 +3048,8 @@ function addFastEnter(name) {
       imageUrl: enabled && sceneImagePath() !== '' ? '/dsh-live-pet/scene/bg?t=' + Math.round(Date.now() / 60000) : '',
       // 宠物窗口要的是本地绝对路径（它自己画背景，不走 HTTP）
       imagePath: enabled ? sceneImagePath() : '',
+      // 游戏画面在背景里占多大（百分比），宠物窗口按这个尺寸摆那块“屏幕”
+      gameWidth: Math.max(20, Math.min(100, Number(config.gameBackdropWidth) || 62)),
       // 宠物只能在背景里活动：把这块矩形交给宠物窗口
       bounds: enabled ? rect : null,
     }
