@@ -161,6 +161,19 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'game',
+    title: '小海豚游戏机',
+    hint: '真·植物大战僵尸（开源复刻，原版素材）：观众说「玩个游戏」，小海豚就自己开一局——攒阳光、种向日葵、补豌豆、上坚果、丢樱桃炸弹，边打边解说。游戏窗口会钉在桌面右上方，第一次跑会自动下载游戏本体（约 7MB）。',
+    fields: [
+      { key: 'gameModeEnabled', label: '开游戏模式', type: 'bool', hint: '弹幕或你自己说「玩个游戏」就开一局；同一个口令不会打断正在打的那局' },
+      { key: 'gameModeVoice', label: '开局/过关/结束要出声', type: 'bool', hint: '关掉只弹气泡，不合成语音（省 TTS 时间）' },
+      { key: 'gameModeQuipEverySec', label: '边打边吐槽的间隔（秒）', type: 'number', hint: '默认 9 秒一句，只弹气泡不发音' },
+      { key: 'gameLevel', label: '打第几关', type: 'number', hint: '0~5：1 是白天前院（默认），数字越大僵尸越猛' },
+      { key: 'gamePort', label: '游戏接口端口', type: 'number', hint: '默认 8794 本机回环；被占就换一个' },
+      { key: 'gamePos', label: '窗口位置 x,y', type: 'text', hint: '默认 1080,180（右上角），窗口会钉在最上层' },
+    ],
+  },
+  {
     id: 'interact', title: '互动', hint: '弹幕、进场、礼物的反应节奏。',
     fields: [
       { key: 'idleChat', label: '冷场自己找话题', type: 'bool' },

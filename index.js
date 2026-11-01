@@ -50,6 +50,12 @@ const PET_CONFIG_KEYS = [
   'eyesEnabled',
   'eyesEverySec',
   'eyesWidth',
+  'gameModeEnabled',
+  'gameModeVoice',
+  'gameModeQuipEverySec',
+  'gamePort',
+  'gameLevel',
+  'gamePos',
   'sceneEnabled',
   'sceneImage',
   'sceneMinimized',
@@ -167,6 +173,18 @@ const DEFAULTS = {
   eyesEnabled: true,
   eyesEverySec: 90,
   eyesWidth: 700,
+  /** 掌机游戏模式：小海豚收到「玩游戏」就随机开一局红白机老游戏（黑白 LCD 演出） */
+  gameModeEnabled: true,
+  /** 开局/过关/结束这些时刻要出声（关掉就只弹气泡） */
+  gameModeVoice: true,
+  /** 打游戏时小吐槽的间隔（秒） */
+  gameModeQuipEverySec: 9,
+  /** 游戏桥接口端口（本机回环） */
+  gamePort: 8794,
+  /** 打第几关（0~5，默认 1 = 白天前院） */
+  gameLevel: 1,
+  /** 游戏窗口放哪："x,y" */
+  gamePos: '1080,180',
   maxChars: 70,
   /** The owner's typed questions get room to answer (they may report tool results). */
   chatMaxChars: 240,
@@ -1040,6 +1058,7 @@ export function apply(ctx) {
     kind: '',
     audioPath: '',
     audioDuration: 0,
+    game: { active: false, frame: [] },
     at: Date.now(),
     turns: 0,
     lastError: '',
@@ -1631,6 +1650,16 @@ async function eyesTick() {
   }
 }
 
+/* ============================== 掌机游戏模式：真·植物大战僵尸
+ * 上游是开源复刻 marblexu/PythonPlantsVsZombies（真素材、真手感），
+ * 由 live/pvz_bridge.py 给它挂一个 HTTP 大脑接口：
+ *   GET  /state  拿到阳光 / 植物 / 僵尸 / 卡片冷却
+ *   POST /cmd    种什么、种哪格、收阳光
+ * 于是小海豚（B）能自己下场打：攒阳光、种向日葵、补豌豆、丢樱桃、上坚果。
+ * 画面就是游戏本体的窗口，不再画黑白点阵。
+ * ============================== */
+const GAME_CATALOG = [{ id: 'pvz', title: '植物大战僵尸', short: 'PvZ' }]
+
 function bump(update) {
     const patch = update && typeof update === 'object' ? update : {}
     const slot = patch.slot === 'b' ? 'b' : patch.slot === 'a' ? 'a' : ''
@@ -1696,7 +1725,7 @@ function bump(update) {
  * 不与正常回合抢麦。
  */
 let fixedChain = Promise.resolve()
-function speakFixed(text, emotion) {
+function speakFixed(text, emotion, slot) {
   const line = String(text || '').trim().slice(0, 80)
   if (line === '') return Promise.resolve()
   const mood = EMOTIONS.includes(emotion)
@@ -1708,7 +1737,7 @@ function speakFixed(text, emotion) {
       bump({
         // 关键：必须带 slot，否则只更新全局 state，窗口轮询的 state.slots.a 没变化 →
         // 气泡不显示、语音也不播（欢迎/关注/点赞/礼物的话术以前就是这样被吞掉的）
-        slot: 'a',
+        slot: slot === 'b' ? 'b' : 'a',
         status: 'speaking',
         say: line,
         emotion: mood,
@@ -1728,6 +1757,353 @@ function speakFixed(text, emotion) {
     }
   })
   return fixedChain
+}
+
+/** 真·植物大战僵尸：游戏进程 + 每一步的"手" */
+const pvz = {
+  timer: null,
+  child: null,
+  port: 0,
+  base: '',
+  starting: false,
+  active: false,
+  lastState: null,
+  planted: 0,
+  seenZombie: false,
+  lastSayAt: 0,
+  gameOver: false,
+  result: '',
+  errors: 0,
+}
+let gameTimer = null // 兼容旧 dispose 代码
+
+/** 游戏放哪、python 怎么起 */
+function pvzPaths() {
+  const base = String(config.liveBaseDir || '').trim() || join(PKG_DIR, 'data')
+  const root = join(base, 'pvz')
+  return { base, root, gameDir: join(root, 'PythonPlantsVsZombies-master'), bridge: join(PKG_DIR, 'live', 'pvz_bridge.py') }
+}
+
+function pvzPort() {
+  return Math.max(1024, Math.min(65000, Number(config.gamePort) || 8794))
+}
+
+function pvzPos() {
+  const rawPos = String(config.gamePos || '1080,180')
+  return /^\d+,\d+$/.test(rawPos) ? rawPos : '1080,180'
+}
+
+function gamePayload() {
+  const st = pvz.lastState
+  const sun = st && typeof st.sun === 'number' ? st.sun : 0
+  const zombies = st && Array.isArray(st.zombies) ? st.zombies.length : 0
+  return {
+    active: pvz.active === true,
+    title: '植物大战僵尸',
+    short: 'PvZ',
+    stage: pvz.active ? 1 : 0,
+    stageName: pvz.active ? `阳光 ${sun}` : '',
+    hud: `阳光 ${sun}   僵尸 ${zombies}   已种 ${pvz.planted}`,
+    score: pvz.planted * 10,
+    lives: 0,
+    sun,
+    zombies,
+    planted: pvz.planted,
+    result: pvz.result,
+    frame: [],
+  }
+}
+
+function gamePublish() {
+  bump({ game: gamePayload() })
+}
+
+function gameSay(text, emotion) {
+  const line = String(text || '').trim()
+  if (line === '') return
+  pvz.lastSayAt = Date.now()
+  if (config.gameModeVoice === false) {
+    bump({ slot: 'b', say: line, emotion: emotion || 'mischievous', status: 'speaking', audioPath: '', audioDuration: 0, turns: state.turns + 1 })
+    pushPool({ kind: 'me', user: agentFor('b').name, text: line })
+    return
+  }
+  void speakFixed(line, emotion || 'mischievous', 'b')
+}
+
+function gameQuip(kind) {
+  const now = Date.now()
+  const gap = Math.max(3, Number(config.gameModeQuipEverySec) || 9) * 1000
+  if (now - pvz.lastSayAt < gap) return
+  const lines = {
+    first: ['我先摆两株向日葵，钱得先攒。', '开局先攒阳光，别急着上火力。'],
+    zombie: ['来了来了，僵尸上草坪了。', '别急着走，这几只我来处理。'],
+    shoot: ['这条道补个豌豆，稳住。', '火力够了，接着攒。'],
+    wall: ['丢个坚果挡一下，拖时间。', '前排垫个坚果，别让它摸到向日葵。'],
+    cherry: ['阳光够了，樱桃直接炸！', '一炸一片，爽。'],
+  }
+  const pool = Array.isArray(lines[kind]) ? lines[kind] : []
+  if (pool.length === 0) return
+  pvz.lastSayAt = now
+  gameSay(pool[Math.floor(Math.random() * pool.length)], 'mischievous')
+}
+
+function pvzBridgeAlive() {
+  return pvz.child !== null && pvz.child.exitCode === null
+}
+
+async function pvzGet(pathname) {
+  const res = await fetch(pvz.base + pathname, { signal: AbortSignal.timeout(6000) })
+  if (!res.ok) throw new Error(`bridge ${res.status}`)
+  return res.json()
+}
+
+async function pvzPost(pathname, body) {
+  const res = await fetch(pvz.base + pathname, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+    signal: AbortSignal.timeout(8000),
+  })
+  return res.json().catch(() => ({}))
+}
+
+/** 第一次跑：把上游游戏拉下来 + 装 pygame（只做一次，之后直接起） */
+async function pvzEnsure(say) {
+  const paths = pvzPaths()
+  mkdirSync(paths.root, { recursive: true })
+  if (!existsSync(join(paths.gameDir, 'main.py'))) {
+    say('游戏还没装，我下一下（一次性的事）。')
+    log('pvz: downloading upstream game')
+    try {
+      const res = await fetch('https://codeload.github.com/marblexu/PythonPlantsVsZombies/zip/refs/heads/master', { signal: AbortSignal.timeout(180000) })
+      if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`)
+      const buf = Buffer.from(await res.arrayBuffer())
+      const zipPath = join(paths.root, 'pvz.zip')
+      writeFileSync(zipPath, buf)
+      const untar = spawnSync('tar', ['-xf', zipPath, '-C', paths.root], { windowsHide: true, encoding: 'utf8' })
+      if (untar.status !== 0) throw new Error(`解压失败：${(untar.stderr || '').slice(0, 200)}`)
+      try { rmSync(zipPath) } catch { /* 留着也无所谓 */ }
+      log('pvz: upstream game ready')
+    } catch (error) {
+      log(`pvz download failed: ${error && error.message ? error.message : error}`)
+      return { ok: false, error: `游戏下载失败：${error && error.message ? error.message : error}` }
+    }
+  }
+  const probe = spawnSync('python', ['-c', 'import pygame'], { windowsHide: true, encoding: 'utf8' })
+  if (probe.status !== 0) {
+    say('缺个 pygame，我装一下，等我半分钟。')
+    log('pvz: installing pygame')
+    const pip = spawnSync('python', ['-m', 'pip', 'install', '--quiet', 'pygame'], { windowsHide: true, encoding: 'utf8', timeout: 600000 })
+    if (pip.status !== 0) {
+      const detail = (pip.stderr || pip.stdout || '').slice(0, 300)
+      log(`pvz pygame install failed: ${detail}`)
+      return { ok: false, error: `装 pygame 失败：${detail}` }
+    }
+    log('pvz: pygame installed')
+  }
+  return { ok: true }
+}
+
+async function stopGame(reason) {
+  pvz.active = false
+  pvz.result = String(reason || '')
+  if (pvz.timer) { clearInterval(pvz.timer); pvz.timer = null }
+  if (pvz.base !== '') { void pvzPost('/cmd', { action: 'quit' }).catch(() => {}) }
+  const child = pvz.child
+  pvz.child = null
+  if (child && child.pid) {
+    try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* 关不掉就算了 */ }
+  }
+  pvz.base = ''
+  pvz.lastState = null
+  gamePublish()
+  log(`pvz stop: ${pvz.result}`)
+  return { ok: true }
+}
+
+async function startGame(byUser) {
+  if (config.gameModeEnabled !== true) return { ok: false, error: '游戏模式没开（设置页 → 小海豚游戏机）' }
+  if (pvz.starting === true) return { ok: false, error: '正在启动，别急' }
+  if (pvz.active === true) return { ok: false, error: '已经在打了' }
+  pvz.starting = true
+  pvz.planted = 0
+  pvz.seenZombie = false
+  pvz.gameOver = false
+  pvz.result = ''
+  pvz.errors = 0
+  try {
+    const who = String(byUser || '').trim()
+    const open = who !== '' && who !== '老板' ? `${who} 点的，` : ''
+    const prepared = await pvzEnsure((line) => gameSay(line, 'mischievous'))
+    if (prepared.ok !== true) return { ok: false, error: prepared.error }
+
+    const paths = pvzPaths()
+    const port = pvzPort()
+    pvz.port = port
+    pvz.base = `http://127.0.0.1:${port}`
+    const level = Math.max(0, Math.min(5, Number(config.gameLevel) || 1))
+    const args = [paths.bridge, '--game-root', paths.gameDir, '--port', String(port), '--level', String(level), '--pos', pvzPos()]
+    const out = join(PKG_DIR, 'pvz.log')
+    const child = spawn('python', args, {
+      cwd: paths.gameDir,
+      windowsHide: true,
+      stdio: 'ignore',
+      detached: false,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    })
+    pvz.child = child
+    child.on('exit', (code) => {
+      log(`pvz process exited (${code})`)
+      if (pvz.active === true) void stopGame('游戏窗口关了')
+    })
+    child.on('error', (error) => log(`pvz process failed: ${error && error.message ? error.message : error}`))
+    log(`pvz process started (pid ${child.pid}, port ${port}, level ${level}, log ${out})`)
+
+    const deadline = Date.now() + 40000
+    let ready = false
+    while (Date.now() < deadline) {
+      await sleep(700)
+      try {
+        const st = await pvzGet('/state')
+        if (st && st.ready === true) { ready = true; pvz.lastState = st; break }
+      } catch { /* 还没起来 */ }
+    }
+    if (!ready) {
+      await stopGame('游戏没起来')
+      return { ok: false, error: '游戏没起来（看 pvz.log）' }
+    }
+
+    pvz.active = true
+    gamePublish()
+    gameSay(`${open}我开一局植物大战僵尸，先种向日葵攒阳光。`, 'happy')
+    log(`game start: 植物大战僵尸 (by ${who || '自动'})`)
+    if (pvz.timer) clearInterval(pvz.timer)
+    pvz.timer = setInterval(() => { void pvzTick() }, 900)
+    return { ok: true, game: gamePayload() }
+  } finally {
+    pvz.starting = false
+  }
+}
+
+/** 主循环：看一眼局面 → 收阳光 → 决定种什么 → 发指令 */
+async function pvzTick() {
+  if (pvz.active !== true) return
+  if (!pvzBridgeAlive()) { await stopGame('游戏进程没了'); return }
+  let st
+  try {
+    st = await pvzGet('/state')
+  } catch (error) {
+    pvz.errors += 1
+    if (pvz.errors > 8) await stopGame('游戏没响应')
+    return
+  }
+  pvz.errors = 0
+  pvz.lastState = st
+
+  if (st.victory === true) {
+    gameSay(`通关了！我一共种了 ${pvz.planted} 株，这关我熟。`, 'happy')
+    await stopGame('通关')
+    return
+  }
+  if (st.lose === true) {
+    gameSay('脑子被僵尸吃了…这局我认，下次再来。', 'crying')
+    await stopGame('被僵尸吃了脑子')
+    return
+  }
+  if (st.playing !== true) { gamePublish(); return }
+
+  if (Number(st.suns_on_lawn) > 0) {
+    void pvzPost('/cmd', { action: 'collect' }).catch(() => {})
+  }
+
+  const plan = pvzDecide(st)
+  if (plan) {
+    try {
+      await pvzPost('/cmd', plan)
+      if (plan.name === 'CherryBomb') gameQuip('cherry')
+      else if (plan.name === 'WallNut') gameQuip('wall')
+      else if (plan.name === 'SunFlower') { if (pvz.planted === 0) gameQuip('first') }
+      else gameQuip('shoot')
+      pvz.planted += 1
+    } catch (error) {
+      log(`pvz cmd failed: ${error && error.message ? error.message : error}`)
+    }
+  }
+  if (!pvz.seenZombie && Array.isArray(st.zombies) && st.zombies.length > 0) {
+    pvz.seenZombie = true
+    gameQuip('zombie')
+  }
+  gamePublish()
+}
+
+/** 电脑的脑子：先攒钱，再补火力，危险车道先垫坚果 / 丢樱桃 */
+function pvzDecide(st) {
+  const grid = Array.isArray(st.grid) ? st.grid : []
+  const cards = {}
+  for (const card of Array.isArray(st.cards) ? st.cards : []) cards[card.name] = card.ready === true
+  const zombies = Array.isArray(st.zombies) ? st.zombies : []
+  const plants = Array.isArray(st.plants) ? st.plants : []
+  const laneZombies = [0, 0, 0, 0, 0]
+  const laneNearest = [9999, 9999, 9999, 9999, 9999]
+  for (const zombie of zombies) {
+    if (zombie.row < 0 || zombie.row > 4) continue
+    laneZombies[zombie.row] += 1
+    laneNearest[zombie.row] = Math.min(laneNearest[zombie.row], Number(zombie.x) || 9999)
+  }
+  const free = (row, col) => {
+    const line = grid[row]
+    return Array.isArray(line) && line[col] === 0
+  }
+  const count = (name) => plants.filter((plant) => plant.name === name).length
+
+  if (cards.CherryBomb === true) {
+    for (let row = 0; row < 5; row += 1) {
+      if (laneZombies[row] >= 4) {
+        for (let col = 3; col >= 1; col -= 1) if (free(row, col)) return { action: 'plant', name: 'CherryBomb', col, row }
+      }
+    }
+  }
+  if (cards.WallNut === true && count('WallNut') < 3) {
+    for (let row = 0; row < 5; row += 1) {
+      if (laneZombies[row] > 0 && laneNearest[row] < 260) {
+        const blocked = plants.some((plant) => plant.row === row && plant.name === 'WallNut')
+        if (blocked) continue
+        for (let col = 4; col >= 1; col -= 1) if (free(row, col)) return { action: 'plant', name: 'WallNut', col, row }
+      }
+    }
+  }
+  if (cards.SunFlower === true && count('SunFlower') < 4) {
+    const order = [2, 1, 3, 0, 4]
+    for (const row of order) {
+      for (let col = 0; col <= 2; col += 1) if (free(row, col)) return { action: 'plant', name: 'SunFlower', col, row }
+    }
+  }
+  if (cards.Peashooter === true && count('Peashooter') < 10) {
+    let target = -1
+    let best = 0
+    for (let row = 0; row < 5; row += 1) if (laneZombies[row] > best) { best = laneZombies[row]; target = row }
+    if (target < 0) target = 2
+    for (let col = 4; col >= 1; col -= 1) if (free(target, col)) return { action: 'plant', name: 'Peashooter', col, row: target }
+    for (let row = 0; row < 5; row += 1) {
+      for (let col = 4; col >= 1; col -= 1) if (free(row, col)) return { action: 'plant', name: 'Peashooter', col, row }
+    }
+  }
+  return null
+}
+
+/** 口令：弹幕/老板说「玩个游戏」就开一局 */
+const GAME_COMMAND = /(玩|打|开|来|整)[^，。！？,!?]{0,4}(游戏|游戏机|红白机|掌机|植物|僵尸|老游戏)|(开黑)|(打一局)|(玩一局)/
+function maybeStartGame(text, user) {
+  if (config.gameModeEnabled !== true) return false
+  const line = String(text || '')
+  if (line === '') return false
+  if (!GAME_COMMAND.test(line)) return false
+  if (pvz.active === true) {
+    gameSay('这局还没打完，僵尸正往上走呢。', 'mischievous')
+    return true
+  }
+  void startGame(user)
+  return true
 }
 
 /** 点赞合并：窗口内的点赞凑一句「谢谢 A、B、C 的点赞」 */
@@ -2165,6 +2541,10 @@ function addFastEnter(name) {
   async function handle(bullet, agent) {
     const me = agent || agentFor('a')
     lastActivity = Date.now()
+    if (bullet && bullet.kind !== 'idle' && bullet.banter !== true && maybeStartGame(bullet.text, bullet.user)) {
+      log(`game command: ${bullet.user || ''} -> ${String(bullet.text || '').slice(0, 40)}`)
+      return null
+    }
     bump({ slot: me.slot, status: 'thinking', user: me.slot === 'b' ? me.name : bullet.user, kind: bullet.kind, say: '', audioPath: '', audioDuration: 0, speaker: '' })
     try {
       const answer = await runTurn(bullet, me)
@@ -3243,6 +3623,25 @@ function addFastEnter(name) {
         return
       }
 /** 自查用：欢迎/感谢为什么没触发，先看这里 */
+/** 掌机游戏：{action: start|stop|status} */
+      if (pathname === '/dsh-live-pet/game') {
+        const body = req.method === 'POST' ? await readJsonBody(req, 8192) : {}
+        const action = String((body && body.action) || searchParams.get('action') || 'status')
+        const catalog = GAME_CATALOG.map((item) => ({ id: item.id, title: item.title, short: item.short }))
+        if (action === 'start') {
+          const started = await startGame((body && body.by) || '老板')
+          sendJson(res, { ...started, catalog })
+          return
+        }
+        if (action === 'stop') {
+          const stopped = await stopGame('手动喊停')
+          sendJson(res, { ...stopped, game: gamePayload(), catalog })
+          return
+        }
+        sendJson(res, { ok: true, game: gamePayload(), catalog, enabled: config.gameModeEnabled === true })
+        return
+      }
+
       if (pathname === '/dsh-live-pet/diag') {
         let liveState = null
         try { liveState = await fetchState(config) } catch (error) { liveState = { error: String(error && error.message ? error.message : error) } }
@@ -3502,6 +3901,15 @@ function addFastEnter(name) {
       banter.timer = null
       if (eyes.timer) clearTimeout(eyes.timer)
       eyes.timer = null
+      if (gameTimer) clearInterval(gameTimer)
+      gameTimer = null
+      if (pvz.timer) clearInterval(pvz.timer)
+      pvz.timer = null
+      if (pvz.child && pvz.child.pid) {
+        try { spawn('taskkill', ['/PID', String(pvz.child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* 关不掉就算了 */ }
+      }
+      pvz.child = null
+      pvz.active = false
       stopPet()
       closeScene()
       if (config.manageLive === true) void stopLive()

@@ -21,6 +21,8 @@ $ErrorActionPreference = 'Stop'
 $script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:Slot = if ($env:PET_SLOT -eq 'b') { 'b' } else { 'a' }
 $script:IsSlotB = ($script:Slot -eq 'b')
+# 黑白掌机窗口总开关：现在是真·植物大战僵尸（游戏本体窗口在演），这里关掉
+$script:ShowGameConsole = $false
 $script:FramesRoot = if ($env:PET_FRAMES) { $env:PET_FRAMES } else { Join-Path $script:Root 'frames' }
 $script:FramesFallback = if ($env:PET_FALLBACK_FRAMES) { $env:PET_FALLBACK_FRAMES } else { Join-Path $script:Root 'frames' }
 $script:StateUrl = if ($env:PET_STATE_URL) { $env:PET_STATE_URL } else { 'http://127.0.0.1:64420/dsh-live-pet/state' }
@@ -1748,6 +1750,344 @@ function Update-ScenePanels($state) {
     if ($script:StatsText.Text -ne $statsText) { $script:StatsText.Text = $statsText }
 }
 
+
+# --------------------------------------------------------------- 掌机游戏机
+# 黑白 LCD 掌机：小海豚打红白机老游戏的"演出"。画面（一格格像素）由插件算好
+# 推过来，这里只负责把它画在一块 Game Boy 味的壳子里。
+$script:GameWin = $null
+$script:GameCells = @{}
+$script:GameFrameKey = ''
+$script:GameCanvas = $null
+$script:GameCellPx = 10
+$script:GameCols = 18
+$script:GameRows = 10
+
+function Get-GameBrush([string]$Hex) {
+    return (New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($Hex)))
+}
+
+function Set-GameGrid([int]$cols, [int]$rows, [int]$cellPx) {
+    if ($cols -lt 4) { $cols = 18 }
+    if ($rows -lt 4) { $rows = 10 }
+    if ($cellPx -lt 2) { $cellPx = 6 }
+    if ($null -eq $script:GameCanvas) { return }
+    if ($cols -eq $script:GameCols -and $rows -eq $script:GameRows -and $cellPx -eq $script:GameCellPx -and $script:GameCells.Count -gt 0) { return }
+    $script:GameCols = $cols
+    $script:GameRows = $rows
+    $script:GameCellPx = $cellPx
+    $canvas = $script:GameCanvas
+    $canvas.Children.Clear()
+    $script:GameCells = @{}
+    $canvas.Width = ($cols * $cellPx)
+    $canvas.Height = ($rows * $cellPx)
+    $paper = Get-GameBrush '#E7E9D6'
+    for ($y = 0; $y -lt $rows; $y++) {
+        for ($x = 0; $x -lt $cols; $x++) {
+            $rect = New-Object System.Windows.Shapes.Rectangle
+            $rect.Width = [Math]::Max(1, ($cellPx - 1))
+            $rect.Height = [Math]::Max(1, ($cellPx - 1))
+            $rect.Fill = $paper
+            [System.Windows.Controls.Canvas]::SetLeft($rect, ($x * $cellPx))
+            [System.Windows.Controls.Canvas]::SetTop($rect, ($y * $cellPx))
+            [void]$canvas.Children.Add($rect)
+            $script:GameCells["$x,$y"] = $rect
+        }
+    }
+    $script:GameFrameKey = ''
+    Write-PetLog ('game grid -> ' + $cols + 'x' + $rows + ' @' + $cellPx + 'px')
+}
+
+function New-GameConsole {
+    if ($null -ne $script:GameWin) { return }
+    try {
+        $win = New-Object System.Windows.Window
+        $win.WindowStyle = [System.Windows.WindowStyle]::None
+        $win.AllowsTransparency = $true
+        $win.Background = [System.Windows.Media.Brushes]::Transparent
+        $win.Topmost = $true
+        $win.ShowInTaskbar = $false
+        $win.ResizeMode = [System.Windows.ResizeMode]::NoResize
+        $win.Width = 320
+        $win.Height = 430
+
+        $shell = New-Object System.Windows.Controls.Border
+        $shell.CornerRadius = (New-Object System.Windows.CornerRadius 26)
+        $shell.Background = (Get-GameBrush '#D9D9CF')
+        $shell.BorderBrush = (Get-GameBrush '#A6A69C')
+        $shell.BorderThickness = (New-Object System.Windows.Thickness 3)
+        $shadow = New-Object System.Windows.Media.Effects.DropShadowEffect
+        $shadow.BlurRadius = 20
+        $shadow.ShadowDepth = 5
+        $shadow.Opacity = 0.42
+        $shell.Effect = $shadow
+        $win.Content = $shell
+        $win.Add_MouseLeftButtonDown({ try { $script:GameWin.DragMove() } catch { } })
+
+        $stack = New-Object System.Windows.Controls.StackPanel
+        $stack.Margin = (New-Object System.Windows.Thickness 14, 12, 14, 8)
+        $shell.Child = $stack
+
+        # ---- 屏幕外框 ----
+        $bezel = New-Object System.Windows.Controls.Border
+        $bezel.Background = (Get-GameBrush '#77776E')
+        $bezel.CornerRadius = (New-Object System.Windows.CornerRadius 12)
+        $bezel.Padding = (New-Object System.Windows.Thickness 10, 9, 10, 9)
+        [void]$stack.Children.Add($bezel)
+
+        $inner = New-Object System.Windows.Controls.StackPanel
+        $bezel.Child = $inner
+
+        $mark = New-Object System.Windows.Controls.TextBlock
+        $mark.Text = 'DOLPHIN BOY  ·  DOT MATRIX WITH STEREO SOUND'
+        $mark.FontFamily = (New-Object System.Windows.Media.FontFamily 'Consolas')
+        $mark.FontSize = 7
+        $mark.Foreground = (Get-GameBrush '#C9C9BE')
+        $mark.Margin = (New-Object System.Windows.Thickness 2, 0, 0, 4)
+        [void]$inner.Children.Add($mark)
+
+        $lcd = New-Object System.Windows.Controls.Border
+        $lcd.Background = (Get-GameBrush '#E7E9D6')
+        $lcd.CornerRadius = (New-Object System.Windows.CornerRadius 4)
+        $lcd.Padding = (New-Object System.Windows.Thickness 7, 5, 7, 6)
+        [void]$inner.Children.Add($lcd)
+
+        $lcdStack = New-Object System.Windows.Controls.StackPanel
+        $lcd.Child = $lcdStack
+
+        $script:GameTitle = New-Object System.Windows.Controls.TextBlock
+        $script:GameTitle.FontFamily = (New-Object System.Windows.Media.FontFamily 'Consolas, Microsoft YaHei UI')
+        $script:GameTitle.FontSize = 11
+        $script:GameTitle.FontWeight = [System.Windows.FontWeights]::Bold
+        $script:GameTitle.Foreground = (Get-GameBrush '#2B2B26')
+        $script:GameTitle.Text = '- INSERT CART -'
+        [void]$lcdStack.Children.Add($script:GameTitle)
+
+        $script:GameHud = New-Object System.Windows.Controls.TextBlock
+        $script:GameHud.FontFamily = (New-Object System.Windows.Media.FontFamily 'Consolas, Microsoft YaHei UI')
+        $script:GameHud.FontSize = 10
+        $script:GameHud.Foreground = (Get-GameBrush '#3A3A33')
+        $script:GameHud.Text = ''
+        [void]$lcdStack.Children.Add($script:GameHud)
+
+        $canvas = New-Object System.Windows.Controls.Canvas
+        $canvas.Background = (Get-GameBrush '#E7E9D6')
+        $canvas.Margin = (New-Object System.Windows.Thickness 0, 3, 0, 3)
+        [void]$lcdStack.Children.Add($canvas)
+        $script:GameCanvas = $canvas
+        $script:GameCells = @{}
+        $script:GameCols = 0
+        $script:GameRows = 0
+        Set-GameGrid 40 26 4
+
+        $script:GameBoss = New-Object System.Windows.Controls.TextBlock
+        $script:GameBoss.FontFamily = (New-Object System.Windows.Media.FontFamily 'Consolas, Microsoft YaHei UI')
+        $script:GameBoss.FontSize = 9
+        $script:GameBoss.Foreground = (Get-GameBrush '#3A3A33')
+        $script:GameBoss.Text = ''
+        [void]$lcdStack.Children.Add($script:GameBoss)
+
+        # ---- 品牌字 ----
+        $brand = New-Object System.Windows.Controls.TextBlock
+        $brand.Text = 'DOLPHIN BOY'
+        $brand.FontFamily = (New-Object System.Windows.Media.FontFamily 'Microsoft YaHei UI')
+        $brand.FontSize = 15
+        $brand.FontStyle = [System.Windows.FontStyles]::Italic
+        $brand.FontWeight = [System.Windows.FontWeights]::Bold
+        $brand.Foreground = (Get-GameBrush '#62625A')
+        $brand.HorizontalAlignment = 'Center'
+        $brand.Margin = (New-Object System.Windows.Thickness 0, 7, 0, 2)
+        [void]$stack.Children.Add($brand)
+
+        $brandSub = New-Object System.Windows.Controls.TextBlock
+        $brandSub.Text = '8-BIT HANDHELD'
+        $brandSub.FontFamily = (New-Object System.Windows.Media.FontFamily 'Consolas')
+        $brandSub.FontSize = 7
+        $brandSub.Foreground = (Get-GameBrush '#8A8A80')
+        $brandSub.HorizontalAlignment = 'Center'
+        $brandSub.Margin = (New-Object System.Windows.Thickness 0, 0, 0, 4)
+        [void]$stack.Children.Add($brandSub)
+
+        # ---- 按键区：十字键 + AB + START/SELECT ----
+        $pad = New-Object System.Windows.Controls.Canvas
+        $pad.Width = 284
+        $pad.Height = 96
+        $pad.HorizontalAlignment = 'Center'
+        [void]$stack.Children.Add($pad)
+
+        $dark = Get-GameBrush '#55554D'
+        $vbar = New-Object System.Windows.Shapes.Rectangle
+        $vbar.Width = 26
+        $vbar.Height = 76
+        $vbar.RadiusX = 4
+        $vbar.RadiusY = 4
+        $vbar.Fill = $dark
+        [System.Windows.Controls.Canvas]::SetLeft($vbar, 34)
+        [System.Windows.Controls.Canvas]::SetTop($vbar, 10)
+        [void]$pad.Children.Add($vbar)
+
+        $hbar = New-Object System.Windows.Shapes.Rectangle
+        $hbar.Width = 76
+        $hbar.Height = 26
+        $hbar.RadiusX = 4
+        $hbar.RadiusY = 4
+        $hbar.Fill = $dark
+        [System.Windows.Controls.Canvas]::SetLeft($hbar, 9)
+        [System.Windows.Controls.Canvas]::SetTop($hbar, 35)
+        [void]$pad.Children.Add($hbar)
+
+        $btnA = New-Object System.Windows.Shapes.Ellipse
+        $btnA.Width = 34
+        $btnA.Height = 34
+        $btnA.Fill = (Get-GameBrush '#9E4148')
+        [System.Windows.Controls.Canvas]::SetLeft($btnA, 222)
+        [System.Windows.Controls.Canvas]::SetTop($btnA, 30)
+        [void]$pad.Children.Add($btnA)
+
+        $btnB = New-Object System.Windows.Shapes.Ellipse
+        $btnB.Width = 34
+        $btnB.Height = 34
+        $btnB.Fill = (Get-GameBrush '#9E4148')
+        [System.Windows.Controls.Canvas]::SetLeft($btnB, 186)
+        [System.Windows.Controls.Canvas]::SetTop($btnB, 44)
+        [void]$pad.Children.Add($btnB)
+
+        foreach ($pair in @(@('A', 231, 36), @('B', 195, 50))) {
+            $t = New-Object System.Windows.Controls.TextBlock
+            $t.Text = $pair[0]
+            $t.FontFamily = (New-Object System.Windows.Media.FontFamily 'Consolas')
+            $t.FontSize = 12
+            $t.FontWeight = [System.Windows.FontWeights]::Bold
+            $t.Foreground = (Get-GameBrush '#E8D6D8')
+            [System.Windows.Controls.Canvas]::SetLeft($t, $pair[1])
+            [System.Windows.Controls.Canvas]::SetTop($t, $pair[2])
+            [void]$pad.Children.Add($t)
+        }
+
+        for ($i = 0; $i -lt 6; $i++) {
+            $dot = New-Object System.Windows.Shapes.Ellipse
+            $dot.Width = 3
+            $dot.Height = 3
+            $dot.Fill = (Get-GameBrush '#8A8A80')
+            [System.Windows.Controls.Canvas]::SetLeft($dot, (120 + ($i * 6)))
+            [System.Windows.Controls.Canvas]::SetTop($dot, 78)
+            [void]$pad.Children.Add($dot)
+        }
+
+        $script:GameHint = New-Object System.Windows.Controls.TextBlock
+        $script:GameHint.Text = 'GAME OVER 后自己关掉'
+        $script:GameHint.FontFamily = (New-Object System.Windows.Media.FontFamily 'Microsoft YaHei UI')
+        $script:GameHint.FontSize = 8
+        $script:GameHint.Foreground = (Get-GameBrush '#8A8A80')
+        $script:GameHint.HorizontalAlignment = 'Center'
+        [void]$stack.Children.Add($script:GameHint)
+
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        $win.Left = $wa.Right - $win.Width - 30
+        $win.Top = $wa.Bottom - $win.Height - 40
+
+        $script:GameWin = $win
+        Write-PetLog 'game console window created'
+    } catch {
+        Write-PetLog ('game console failed: ' + $_.Exception.Message)
+        $script:GameWin = $null
+    }
+}
+
+function Update-GameConsole($game) {
+    if ($script:IsSlotB) { return }
+    if ($null -eq $game) { return }
+    # 现在演的是游戏本体窗口（真画面），宠物窗口里不再弹黑白掌机
+    if (-not $script:ShowGameConsole) {
+        if ($null -ne $script:GameWin -and $script:GameWin.IsVisible) {
+            $script:GameWin.Hide()
+            Write-PetLog 'game console hidden'
+        }
+        return
+    }
+    if (-not ($game.PSObject.Properties.Name -contains 'active')) { return }
+    if (-not [bool]$game.active) {
+        if ($null -ne $script:GameWin -and $script:GameWin.IsVisible) {
+            $script:GameWin.Hide()
+            Write-PetLog 'game console hidden'
+        }
+        return
+    }
+    New-GameConsole
+    if ($null -eq $script:GameWin) { return }
+
+    $title = [string]$game.title
+    if (-not [string]::IsNullOrWhiteSpace([string]$game.stageName)) {
+        $title = $title + '  ·  ' + [string]$game.stageName
+    }
+    if ($script:GameTitle.Text -ne $title) { $script:GameTitle.Text = $title }
+    $hud = [string]$game.hud
+    if ($script:GameHud.Text -ne $hud) { $script:GameHud.Text = $hud }
+
+    $bossText = ''
+    if ([int]$game.bossHp -gt 0) {
+        $bossText = [string]$game.boss + '  ' + ([string]$game.bossBar)
+    } else {
+        $bossText = 'BOSS 已击破 → 下一关'
+    }
+    if ($script:GameBoss.Text -ne $bossText) { $script:GameBoss.Text = $bossText }
+
+    # 画面尺寸（植物大战僵尸给的是 40x26 的 4px 点；换游戏会自动重建格子）
+    $cols = 40
+    $rows = 26
+    $cellPx = 4
+    if ($game.PSObject.Properties.Name -contains 'cols') { $cols = [int]$game.cols }
+    if ($game.PSObject.Properties.Name -contains 'rows') { $rows = [int]$game.rows }
+    if ($game.PSObject.Properties.Name -contains 'cell') { $cellPx = [int]$game.cell }
+    Set-GameGrid $cols $rows $cellPx
+
+    $frame = $game.frame
+    $key = ''
+    if ($null -ne $frame) { $key = [string]($frame -join '|') }
+    if ($key -ne $script:GameFrameKey) {
+        $script:GameFrameKey = $key
+        $on = Get-GameBrush '#2B2B26'
+        $off = Get-GameBrush '#E7E9D6'
+        for ($y = 0; $y -lt $script:GameRows; $y++) {
+            $row = ''
+            if ($null -ne $frame -and $frame.Count -gt $y) { $row = [string]$frame[$y] }
+            for ($x = 0; $x -lt $script:GameCols; $x++) {
+                $ch = '.'
+                if ($row.Length -gt $x) { $ch = $row.Substring($x, 1) }
+                $cell = $script:GameCells["$x,$y"]
+                if ($null -eq $cell) { continue }
+                if ($ch -eq '.') { $cell.Fill = $off } else { $cell.Fill = $on }
+            }
+        }
+    }
+
+    if (-not $script:GameWin.IsVisible) {
+        $script:GameWin.Show()
+        Write-PetLog ('game console shown: ' + $title)
+    }
+}
+
+function Start-DolphinGame {
+    $url = $script:HostBase + '/game'
+    Start-Job -ArgumentList $url -ScriptBlock {
+        param($url)
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($url)
+            $request.Method = 'POST'
+            $request.ContentType = 'application/json; charset=utf-8'
+            $request.Timeout = 20000
+            $request.Proxy = $null
+            $body = [System.Text.Encoding]::UTF8.GetBytes('{"action":"start","by":"老板"}')
+            $request.ContentLength = $body.Length
+            $stream = $request.GetRequestStream()
+            $stream.Write($body, 0, $body.Length)
+            $stream.Close()
+            $response = $request.GetResponse()
+            $response.Close()
+        } catch { }
+    } | Out-Null
+    Show-Bubble '小海豚开游戏机了…' 6000
+}
+
 function Apply-State($state) {
     if (-not $script:IsSlotB) {
         Update-Board
@@ -1757,6 +2097,8 @@ function Apply-State($state) {
         Set-PetState 'crying'
         return
     }
+    # 掌机游戏：有局面就画出来（画面变了才重绘）
+    if ($state.PSObject.Properties.Name -contains 'game') { Update-GameConsole $state.game }
     # 溜达配置由插件下发（每轮都读一次，改了设置立刻生效，不用重启窗口）
     if ($state.PSObject.Properties.Name -contains 'wander') {
         $w = $state.wander
@@ -2152,6 +2494,12 @@ $lookItem.Header = '看一眼桌面'
 $lookItem.Add_Click({ Look-Desktop })
 [void]$menu.Items.Add($lookItem)
 
+# 让小海豚玩游戏：随机抽一盘红白机老游戏，黑白掌机窗口弹出来
+$gameItem = New-Object System.Windows.Controls.MenuItem
+$gameItem.Header = '让小海豚玩游戏机'
+$gameItem.Add_Click({ Start-DolphinGame })
+[void]$menu.Items.Add($gameItem)
+
 # 看一眼图片：挑一张本地图（png/jpg/gif/bmp/webp）丢给视觉模型
 $lookImageItem = New-Object System.Windows.Controls.MenuItem
 $lookImageItem.Header = '看一眼图片…'
@@ -2284,6 +2632,7 @@ $script:Window.Add_Closed({
     $script:PartnerHideTimer.Stop()
     $script:PartnerWalkTimer.Stop()
     try { $script:Player.Close() } catch { }
+if ($null -ne $script:GameWin) { try { $script:GameWin.Close() } catch { } }
     try { $script:PartnerPlayer.Close() } catch { }
 })
 

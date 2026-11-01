@@ -382,6 +382,28 @@ plugin_manager remove_bundle target="dsh-live-pet"
 
 再删掉 `$DSH_HOME\profiles\pet\`（插件生成的宠物 profile）即可。
 
+## 小海豚游戏模式（真·植物大战僵尸）
+
+小海豚（B）会下场打真正的《植物大战僵尸》：
+
+- 游戏本体用的是开源复刻 [marblexu/PythonPlantsVsZombies](https://github.com/marblexu/PythonPlantsVsZombies)（pygame，原版素材）。
+  **仓库里不放游戏代码**，第一次开局时自动从上游下载到 `%DSH_LIVE_BASE%\pvz\`（约 7MB），并确保 `pygame` 已安装。
+- `live/pvz_bridge.py` 给游戏挂了个本机 HTTP 接口：`GET /state` 读阳光/植物/僵尸/卡片冷却，`POST /cmd` 种植物、收阳光。
+- 插件里的“脑子”每 0.9 秒看一次局面并决策：先攒阳光（向日葵）、补豌豆、危险车道垫坚果、挤爆了丢樱桃炸弹；开局/遇敌/过关会说一句。
+- 口令：弹幕或自己说「玩个游戏 / 打一局 / 玩一局」就开一把；窗口默认钉在屏幕右上（1080,180）且置顶。
+- 相关配置（设置页「小海豚游戏机」）：`gameModeEnabled` / `gameModeVoice` / `gameModeQuipEverySec` / `gameLevel` / `gamePort` / `gamePos`。
+
+接口也可以手动调：
+
+```powershell
+# 开一局
+Invoke-RestMethod http://127.0.0.1:51357/dsh-live-pet/game -Method Post -Body '{"action":"start"}' -ContentType 'application/json'
+# 看局面（桥接口）
+Invoke-RestMethod http://127.0.0.1:8794/state
+# 让它种一株向日葵到第 3 行第 2 列
+Invoke-RestMethod http://127.0.0.1:8794/cmd -Method Post -Body '{"action":"plant","name":"SunFlower","col":2,"row":3}' -ContentType 'application/json'
+```
+
 ## License
 
 MIT
